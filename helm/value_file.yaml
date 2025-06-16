@@ -1,0 +1,14 @@
+global:
+  dynamic:
+    includes:
+      - 'dynamic-plugins.default.yaml'
+    plugins:
+    - package: ./dynamic-plugins/dist/backstage-community-plugin-catalog-backend-module-keycloak-dynamic
+      disabled: false
+upstream:
+  backstage:
+    extraAppConfig:
+      - configMapRef: app-config-rhdh
+        filename: app-config-rhdh.yaml
+    extraEnvVarsSecrets:
+      - rhdh-secrets
