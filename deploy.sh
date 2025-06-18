@@ -12,7 +12,7 @@ echo "Deploying Developer Hub"
 bash helm/helm-install.sh --namespace=skhileri-rhdh-test --CV=1.5-171-CI
 echo "Deployed Developer Hub"
 
-
+gh --version
 gh pr comment $GIT_PR_NUMBER --repo openshift/release --body "RHDH URL: $RHDH_BASE_URL | OpenShift Console URL: https://console-openshift-console.${CLUSTER_ROUTER_BASE}"
 
 sleep 7200
