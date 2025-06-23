@@ -1,3 +1,10 @@
+app:
+  baseUrl: "${RHDH_BASE_URL}"
+backend:
+  baseUrl: "${RHDH_BASE_URL}"
+  cors:
+    origin: "${RHDH_BASE_URL}"
+
 auth:
   # see https://backstage.io/docs/auth/ to learn about auth providers
   environment: production

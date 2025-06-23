@@ -1,10 +1,10 @@
-global:
-  dynamic:
-    includes:
-      - 'dynamic-plugins.default.yaml'
-    plugins:
-    - package: ./dynamic-plugins/dist/backstage-community-plugin-catalog-backend-module-keycloak-dynamic
-      disabled: false
+# NOTE: This global dynamic plugins configuration will be overridden by config/dynamic-plugins.yaml
+# To add any plugin configuration, please add it to the dynamic-plugins.yaml file instead
+# global:
+#   dynamic:
+#     includes:
+#       - 'dynamic-plugins.default.yaml'
+#     plugins: []
 upstream:
   backstage:
     extraAppConfig:
