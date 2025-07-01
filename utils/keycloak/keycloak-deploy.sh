@@ -176,7 +176,7 @@ curl -s -X POST "$KEYCLOAK_URL/admin/realms/rhdh/users" \
     "enabled": true,
     "email": "test1@redhat.com",
     "firstName": "test1", 
-    "lastName": "test1",
+    "lastName": "lastname1",
     "emailVerified": true,
     "attributes": {
       "locale": ["en"]
@@ -197,7 +197,7 @@ curl -s -X POST "$KEYCLOAK_URL/admin/realms/rhdh/users" \
     "enabled": true,
     "email": "test2@redhat.com",
     "firstName": "test2",
-    "lastName": "test2",
+    "lastName": "lastname2",
     "emailVerified": true,
     "attributes": {
       "locale": ["en"]
