@@ -8,6 +8,8 @@ backend:
 auth:
   # see https://backstage.io/docs/auth/ to learn about auth providers
   environment: production
+  session:
+    secret: superSecretSecret 
   providers:
     oidc:
       production:
