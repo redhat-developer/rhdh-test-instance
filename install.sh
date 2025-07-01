@@ -19,7 +19,7 @@ if [[ $# -ne 2 ]]; then
 fi
 
 installation_method="$1"
-CV="$2"
+version="$2"
 
 # Validate installation method
 if [[ "$installation_method" != "helm" && "$installation_method" != "operator" ]]; then
@@ -28,7 +28,11 @@ if [[ "$installation_method" != "helm" && "$installation_method" != "operator" ]
     exit 1
 fi
 
-[[ "${OPENSHIFT_CI}" == "false" ]] && source .env
+# Deploy Keycloak with users and roles.
+# comment this out if you don't want to deploy Keycloak or use your own Keycloak instance.
+source utils/keycloak/keycloak-deploy.sh $namespace
+
+[[ "${OPENSHIFT_CI}" != "true" ]] && source .env
 # source utils/utils.sh
 
 # Create or switch to the specified namespace
@@ -42,6 +46,21 @@ oc create configmap app-config-rhdh \
 
 export CLUSTER_ROUTER_BASE=$(oc get route console -n openshift-console -o=jsonpath='{.spec.host}' | sed 's/^[^.]*\.//')
 
+if [[ "$version" == "next" ]]; then
+    CV=$(echo $(curl -sS https://raw.githubusercontent.com/rhdh-bot/openshift-helm-charts/refs/heads/rhdh-1-rhel-9/installation/README.md | grep -oE '[0-9]+\.[0-9]+-[0-9]+-CI' | head -1))
+
+elif [[ "$version" =~ ^([0-9]+(\.[0-9]+)?)$ ]]; then
+    CV=$(echo $(curl -sS https://raw.githubusercontent.com/rhdh-bot/openshift-helm-charts/refs/heads/rhdh-${version}-rhel-9/installation/README.md | grep -oE '[0-9]+\.[0-9]+-[0-9]+-CI' | head -1))
+
+elif [[ "$version" =~ "CI$" ]]; then
+    CV=$version
+else
+    echo "Error: Invalid helm chart version: $version"
+    [[ "$OPENSHIFT_CI" == "true" ]] && gh_comment "❌ **Error: Invalid helm chart version** 🚫\n\n📝 **Provided version:** \`$version\`\n\nPlease check your version and try again! 🔄"
+    exit 1
+fi
+
+echo "Using Helm chart version: ${CV}"
 
 CHART_URL="oci://quay.io/rhdh/chart"
 if ! helm show chart $CHART_URL --version $CV &> /dev/null; then github=1; fi
