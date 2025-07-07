@@ -83,8 +83,11 @@ helm upgrade redhat-developer-hub -i "${CHART_URL}" --version "$CV" \
     -f <(echo "global:"; echo "  dynamic:"; cat config/dynamic-plugins.yaml | sed 's/^/    /') \
     --set global.clusterRouterBase="${CLUSTER_ROUTER_BASE}"
 
+# Restart the deployment to ensure fresh pods
+oc rollout restart deployment/redhat-developer-hub -n "$namespace"
 
-oc wait --for=condition=Ready pod --all -n "$namespace" --timeout=300s || echo "Error: Timed out waiting for pods to be ready."
+# Wait for the deployment to be ready
+oc rollout status deployment/redhat-developer-hub -n "$namespace" --timeout=300s || echo "Error: Timed out waiting for deployment to be ready."
 
 echo "
 RHDH_BASE_URL : 

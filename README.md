@@ -1,14 +1,13 @@
 # RHDH Test Instance
 
-A comprehensive test instance setup for **Red Hat Developer Hub (RHDH)** on OpenShift, providing a ready-to-use developer portal with authentication, catalog management, and dynamic plugin support.
+A comprehensive test instance setup for **Red Hat Developer Hub (RHDH)** on OpenShift, providing a ready-to-use developer portal with authentication, app-config, and dynamic plugin config.
 
 ## Overview
 
-This project provides automated deployment scripts and configuration files to set up a fully functional RHDH test instance on OpenShift. RHDH is Red Hat's enterprise-ready developer portal based on the open-source Backstage project, designed to unify developer tools and improve developer experience.
+This project provides automated deployment scripts and configuration files to set up a fully functional RHDH test instance on OpenShift.
 
 ### Features
 
-- 🚀 **Automated deployment** with Helm charts or Operators (Comming Soon)
 - 🤖 **GitHub PR Integration** with `/test` command for on-demand deployments
 - 📦 **Multiple Install Types**: Support for both Helm and Operator (Comming Soon) installation methods
 - 🔄 **Flexible Version Support**: Deploy any RHDH version (latest, semantic versions like 1.7, CI builds like 1.7-98-CI)
@@ -70,6 +69,16 @@ The bot provides comprehensive feedback through PR comments for eg:
 
 ⏰ Cluster Availability: Next 1 hours
 ```
+
+
+
+### Live Status of deploy Job
+
+**Prow Status:**
+https://prow.ci.openshift.org/?repo=redhat-developer%2Frhdh-test-instance&type=presubmit&job=pull-ci-redhat-developer-rhdh-test-instance-main-deploy
+
+**Job History:**
+https://prow.ci.openshift.org/job-history/gs/test-platform-results/pr-logs/directory/pull-ci-redhat-developer-rhdh-test-instance-main-deploy
 
 ### Testing Custom Configurations via PRs
 
@@ -254,25 +263,18 @@ rhdh-test-instance/
 
 ## Environment Variables
 
-The following environment variables are used (automatically managed by the script):
+### PR Deployments (Vault Integration)
 
-| Variable | Description |
-|----------|-------------|
-| `RHDH_BASE_URL` | Base URL for RHDH instance |
-| `KEYCLOAK_BASE_URL` | Keycloak server URL |
-| `KEYCLOAK_METADATA_URL` | OIDC metadata endpoint |
-| `KEYCLOAK_LOGIN_REALM` | Keycloak login realm |
-| `KEYCLOAK_REALM` | Keycloak realm name |
-| `KEYCLOAK_CLIENT_ID` | OIDC client ID |
-| `KEYCLOAK_CLIENT_SECRET` | OIDC client secret |
-| `CLUSTER_ROUTER_BASE` | OpenShift cluster router base |
+When using PR deployments, secrets are automatically pulled from vault at:
+https://vault.ci.openshift.org/ui/vault/secrets/kv/kv/list/selfservice/rhdh-test-instance/
 
-## Advanced Features
+These secrets are available as environment variables with the same name and can be used directly in Kubernetes secrets. From there, they can be referenced in `app-config-rhdh.yaml` or `dynamic-plugins.yaml` configurations.
 
-### Smart Version Resolution
+**Access Requirements:**
+- To add or view vault secrets, ensure you have appropriate access
+- For access requests, reach out in #team-rhdh slack channel
 
-The framework supports flexible version specifications:
+### Local Deployments (.env Configuration)
 
-- **Semantic Versions**: `1.7`, `1.6`, `1.5` (resolves to latest patch)
-- **CI Builds**: `1.7-98-CI`, `1.6-45-CI` (specific CI versions)
-- **Latest**: `next` (latest CI build from main branch)
+For local development, you can add secrets in a `.env` file and use them in your app-config or dynamic plugins configuration.
+
