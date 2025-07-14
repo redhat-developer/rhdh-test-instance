@@ -46,13 +46,9 @@ oc create configmap app-config-rhdh \
 
 export CLUSTER_ROUTER_BASE=$(oc get route console -n openshift-console -o=jsonpath='{.spec.host}' | sed 's/^[^.]*\.//')
 
-if [[ "$version" == "next" ]]; then
-    CV=$(echo $(curl -sS https://raw.githubusercontent.com/rhdh-bot/openshift-helm-charts/refs/heads/rhdh-1-rhel-9/installation/README.md | grep -oE '[0-9]+\.[0-9]+-[0-9]+-CI' | head -1))
-
-elif [[ "$version" =~ ^([0-9]+(\.[0-9]+)?)$ ]]; then
-    CV=$(echo $(curl -sS https://raw.githubusercontent.com/rhdh-bot/openshift-helm-charts/refs/heads/rhdh-${version}-rhel-9/installation/README.md | grep -oE '[0-9]+\.[0-9]+-[0-9]+-CI' | head -1))
-
-elif [[ "$version" =~ "CI$" ]]; then
+if [[ "$version" =~ ^([0-9]+(\.[0-9]+)?)$ ]]; then
+    CV=$(curl -s "https://quay.io/api/v1/repository/rhdh/chart/tag/?onlyActiveTags=true&limit=600" | jq -r '.tags[].name' | grep "^${version}-" | sort -V | tail -n 1)
+elif [[ "$version" =~ CI$ ]]; then
     CV=$version
 else
     echo "Error: Invalid helm chart version: $version"
