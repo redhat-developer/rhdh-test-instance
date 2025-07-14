@@ -41,7 +41,7 @@ The bot supports flexible deployment commands directly from PR comments:
 ```
 /test deploy helm 1.7 4h          # Deploy RHDH 1.7 with Helm, cleanup after 4 hours
 /test deploy operator 1.6 2.5     # Deploy RHDH 1.6 with Operator, cleanup after 2.5 hours
-/test deploy helm next            # Deploy latest CI version with Helm with defaut duration 3h
+/test deploy helm 1.7            # Deploy latest CI version with Helm with defaut duration 3h
 /test deploy operator 1.7-98-CI   # Deploy specific CI build with Operator
 ```
 
@@ -57,7 +57,7 @@ The bot supports flexible deployment commands directly from PR comments:
 The bot provides comprehensive feedback through PR comments for eg:
 
 ```
-🚀 Deployed RHDH version: next using helm
+🚀 Deployed RHDH version: 1.7 using helm
 
 🌐 RHDH URL: https://redhat-developer-hub-rhdh.apps.rhdh-4-17-us-east-2-kz69l.rhdh-qe.devcluster.openshift.com
 
@@ -112,7 +112,7 @@ For local development and testing environments, you can deploy RHDH directly to 
 
 3. **Or deploy with the latest main version:**
    ```bash
-   ./install.sh helm next
+   ./install.sh helm 1.7
    ```
 
 4. **Access your RHDH instance:**
@@ -127,7 +127,6 @@ For local development and testing environments, you can deploy RHDH directly to 
 ```
 
 **Available versions:**
-- `next` - Latest CI version
 - `1.7` - Latest stable 1.7 version
 - `1.6` - Latest stable 1.6 version
 - `1.5` - Latest stable 1.5 version
@@ -136,7 +135,7 @@ For local development and testing environments, you can deploy RHDH directly to 
 
 **Example:**
 ```bash
-./install.sh helm next
+./install.sh helm 1.7
 ```
 
 #### Method 2: Operator Installation  (Comming Soon)
