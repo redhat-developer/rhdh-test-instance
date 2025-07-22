@@ -3,4 +3,12 @@ includes:
 plugins:
   - package: ./dynamic-plugins/dist/backstage-community-plugin-catalog-backend-module-keycloak-dynamic
     disabled: false
-  
+
+  - disabled: false
+    package: ./dynamic-plugins/dist/backstage-plugin-scaffolder-backend-module-github-dynamic
+
+  # Enable Bulk import plugins.
+  - package: ./dynamic-plugins/dist/red-hat-developer-hub-backstage-plugin-bulk-import-backend-dynamic
+    disabled: false
+  - package: ./dynamic-plugins/dist/red-hat-developer-hub-backstage-plugin-bulk-import
+    disabled: false

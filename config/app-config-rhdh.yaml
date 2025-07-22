@@ -5,6 +5,9 @@ backend:
   cors:
     origin: "${RHDH_BASE_URL}"
 
+buildInfo:
+  title: "My Build Info"
+
 auth:
   # see https://backstage.io/docs/auth/ to learn about auth providers
   environment: production
@@ -34,6 +37,17 @@ catalog:
       target: https://github.com/redhat-developer/rhdh/blob/main/catalog-entities/all.yaml
     - type: url
       target: https://github.com/redhat-developer/red-hat-developer-hub-software-templates/blob/main/templates.yaml
+    # Orchestrator templates
+    - type: url
+      target: https://github.com/rhdhorchestrator/workflow-software-templates/blob/v1.5.x/scaffolder-templates/github-workflows/basic-workflow/template.yaml
+    - type: url
+      target: https://github.com/rhdhorchestrator/workflow-software-templates/blob/v1.5.x/scaffolder-templates/github-workflows/advanced-workflow/template.yaml
+    - type: url
+      target: https://github.com/rhdhorchestrator/workflow-software-templates/blob/v1.5.x/scaffolder-templates/github-workflows/convert-workflow-to-template/template.yaml
+    - type: url
+      # (Optional) Workflow resources (group and system)
+      target: https://github.com/rhdhorchestrator/workflow-software-templates/blob/v1.5.x/entities/workflow-resources.yaml
+
   providers:
     keycloakOrg:
       default:
@@ -46,3 +60,10 @@ catalog:
           frequency: { minutes: 3 }
           initialDelay: { seconds: 15 }
           timeout: { minutes: 5 }
+
+# integrations:
+#   github:
+#     - host: github.com
+#       # This is a Personal Access Token or PAT from GitHub. You can find out how to generate this token, and more information
+#       # about setting up the GitHub integration here: https://backstage.io/docs/getting-started/configuration#setting-up-a-github-integration
+#       token: ${GITHUB_TOKEN}
