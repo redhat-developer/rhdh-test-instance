@@ -8,7 +8,7 @@ plugins:
     package: ./dynamic-plugins/dist/backstage-plugin-scaffolder-backend-module-github-dynamic
 
   # Enable Bulk import plugins.
-  - package: ./dynamic-plugins/dist/red-hat-developer-hub-backstage-plugin-bulk-import-backend-dynamic
+  - package: "oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/red-hat-developer-hub-backstage-plugin-bulk-import-backend:pr_1271__6.1.5!red-hat-developer-hub-backstage-plugin-bulk-import-backend"
     disabled: false
-  - package: ./dynamic-plugins/dist/red-hat-developer-hub-backstage-plugin-bulk-import
+  - package: "oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/red-hat-developer-hub-backstage-plugin-bulk-import:pr_1271__1.13.4!red-hat-developer-hub-backstage-plugin-bulk-import"
     disabled: false
