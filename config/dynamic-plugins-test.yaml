@@ -1,3 +1,0 @@
-plugins:
-  - package: ./dynamic-plugins/dist/backstage-community-plugin-tech-radar-backend-dynamic
-    disabled: true
