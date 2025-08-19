@@ -9,7 +9,7 @@ This project provides automated deployment scripts and configuration files to se
 ### Features
 
 - 🤖 **GitHub PR Integration** with `/test` command for on-demand deployments
-- 📦 **Multiple Install Types**: Support for both Helm and Operator (Comming Soon) installation methods
+- 📦 **Multiple Install Types**: Support for both Helm and Operator installation methods
 - 🔄 **Flexible Version Support**: Deploy any RHDH version (latest, semantic versions like 1.7, CI builds like 1.7-98-CI)
 - 🌐 **Cluster Information Sharing**: Automatic sharing of deployment URLs, OpenShift console access, and cluster credentials
 - 🔐 **Integrated Keycloak Authentication**: Automatic Keycloak deployment with pre-configured realm and test users
@@ -33,14 +33,14 @@ The bot supports flexible deployment commands directly from PR comments:
 ```
 
 **Parameters:**
-- `install-type`: `helm` or `operator`  (operator Comming Soon)
+- `install-type`: `helm` or `operator`
 - `version`: Version to deploy (see supported versions below)
 - `duration`: Optional cleanup timer (e.g., `4h`, `2.5h`)
 
 **Examples:**
 ```
 /test deploy helm 1.7 4h          # Deploy RHDH 1.7 with Helm, cleanup after 4 hours
-/test deploy operator 1.6 2.5     # Deploy RHDH 1.6 with Operator, cleanup after 2.5 hours
+/test deploy operator 1.6 2.5h     # Deploy RHDH 1.6 with Operator, cleanup after 2.5 hours
 /test deploy helm 1.7            # Deploy latest CI version with Helm with defaut duration 3h
 /test deploy operator 1.7-98-CI   # Deploy specific CI build with Operator
 ```
@@ -138,7 +138,7 @@ For local development and testing environments, you can deploy RHDH directly to 
 ./install.sh helm 1.7
 ```
 
-#### Method 2: Operator Installation  (Comming Soon)
+#### Method 2: Operator Installation
 
 ```bash
 ./install.sh operator <version> 
