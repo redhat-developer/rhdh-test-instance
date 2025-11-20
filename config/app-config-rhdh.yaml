@@ -1,4 +1,5 @@
 app:
+  title: My tests
   baseUrl: "${RHDH_BASE_URL}"
 backend:
   baseUrl: "${RHDH_BASE_URL}"
