@@ -4,8 +4,13 @@ global:
 
 replicaCount: 1
 
-# Use Bitnami's default Keycloak image
-# image section can be removed to use defaults
+# Use Bitnami legacy repository (Bitnami images moved to bitnamilegacy as of Aug 2025)
+# Note: Legacy images are not updated/maintained. Consider migrating to official Keycloak image for long-term.
+image:
+  registry: docker.io
+  repository: bitnamilegacy/keycloak
+  tag: "26.3.3-debian-12-r0"
+  pullPolicy: IfNotPresent
 
 auth:
   adminUser: admin
