@@ -1,4 +1,5 @@
 app:
+  title: my awesome rhdh
   baseUrl: "${RHDH_BASE_URL}"
 backend:
   baseUrl: "${RHDH_BASE_URL}"
