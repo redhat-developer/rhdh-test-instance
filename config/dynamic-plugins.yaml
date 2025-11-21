@@ -3,4 +3,18 @@ includes:
 plugins:
   - package: ./dynamic-plugins/dist/backstage-community-plugin-catalog-backend-module-keycloak-dynamic
     disabled: false
-  
+  - package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-todo:next__0.12.0
+    disabled: false
+    pluginConfig:
+      dynamicPlugins:
+        frontend:
+          backstage-community.plugin-todo:
+            mountPoints:
+              - mountPoint: entity.page.todo/cards
+                importName: EntityTodoContent
+            entityTabs:
+              - path: /todo
+                title: Todo
+                mountPoint: entity.page.todo
+  - package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-todo-backend:next__0.13.0
+    disabled: false
