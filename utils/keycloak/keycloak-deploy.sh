@@ -21,12 +21,52 @@ helm repo update
 echo -e "${YELLOW}Creating namespace: $NAMESPACE${NC}"
 kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
+# Check if Keycloak is already deployed and healthy
+if helm list -n $NAMESPACE | grep -q "^$KEYCLOAK_RELEASE_NAME"; then
+  echo -e "${YELLOW}Keycloak is already deployed. Checking health...${NC}"
+  if kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
+    echo -e "${GREEN}✅ Keycloak is already running and healthy. Skipping deployment.${NC}"
+    SKIP_DEPLOYMENT=true
+  else
+    echo -e "${YELLOW}Keycloak exists but is not healthy. Redeploying...${NC}"
+    SKIP_DEPLOYMENT=false
+  fi
+else
+  SKIP_DEPLOYMENT=false
+fi
+
 # Deploy Keycloak using Helm
-echo -e "${YELLOW}Deploying Keycloak with Helm...${NC}"
-helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
-  --namespace $NAMESPACE \
-  --values utils/keycloak/keycloak-values.yaml \
-  --wait --timeout=10m
+if [ "$SKIP_DEPLOYMENT" != "true" ]; then
+  echo -e "${YELLOW}Deploying Keycloak with Helm...${NC}"
+  
+  # Try deployment with retries
+  MAX_RETRIES=2
+  RETRY_COUNT=0
+  
+  while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
+      --namespace $NAMESPACE \
+      --values utils/keycloak/keycloak-values.yaml \
+      --wait --timeout=20m; then
+      echo -e "${GREEN}✅ Keycloak deployed successfully${NC}"
+      break
+    else
+      RETRY_COUNT=$((RETRY_COUNT + 1))
+      if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+        echo -e "${YELLOW}⚠️  Deployment attempt $RETRY_COUNT failed. Retrying in 30 seconds...${NC}"
+        sleep 30
+      else
+        echo -e "${RED}❌ Helm deployment failed after $MAX_RETRIES attempts. Checking pod status...${NC}"
+        kubectl get pods -n $NAMESPACE
+        echo -e "${YELLOW}Pod descriptions:${NC}"
+        kubectl describe pods -n $NAMESPACE -l app.kubernetes.io/name=keycloak
+        echo -e "${YELLOW}Recent logs:${NC}"
+        kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=keycloak --tail=50 --all-containers=true || true
+        exit 1
+      fi
+    fi
+  done
+fi
 
 # Create OpenShift Route
 echo -e "${YELLOW}Creating OpenShift Route...${NC}"
