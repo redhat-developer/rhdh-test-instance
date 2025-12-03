@@ -3,4 +3,50 @@ includes:
 plugins:
   - package: ./dynamic-plugins/dist/backstage-community-plugin-catalog-backend-module-keycloak-dynamic
     disabled: false
+  - package: ./dynamic-plugins/dist/red-hat-developer-hub-backstage-plugin-bulk-import
+    disabled: false
+  - package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/red-hat-developer-hub-backstage-plugin-bulk-import:bs_1.42.5__1.18.1
+    disabled: true
+    pluginConfig:
+      dynamicPlugins:
+        frontend:
+          red-hat-developer-hub.backstage-plugin-bulk-import:
+            translationResources:
+            - importName: bulkImportTranslations
+              module: Alpha
+              ref: bulkImportTranslationRef
+            appIcons:
+            - name: bulkImportIcon
+              importName: BulkImportIcon
+            dynamicRoutes:
+            - path: /bulk-import/repositories
+              importName: BulkImportPage
+              menuItem:
+                icon: bulkImportIcon
+                text: Bulk import
+                textKey: menuItem.bulkImport
+  - package: ./dynamic-plugins/dist/red-hat-developer-hub-backstage-plugin-bulk-import-backend-dynamic
+    disabled: false
+  - package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-plugin-notifications:bs_1.42.5__0.5.8
+    # new approach using oci images: to switch to the new approach, remove
+    # these comments + the next two lines, but keep the pluginConfig details.
+    disabled: true
+    pluginConfig:
+      dynamicPlugins:
+        frontend:
+          backstage.plugin-notifications:
+            dynamicRoutes:
+            - importName: NotificationsPage
+              menuItem:
+                config:
+                  props:
+                    titleCounterEnabled: true
+                    webNotificationsEnabled: false
+                importName: NotificationsSidebarItem
+              path: /notifications
+  - package: ./dynamic-plugins/dist/backstage-plugin-notifications
+    disabled: false
+  - package: ./dynamic-plugins/dist/backstage-plugin-notifications-backend-dynamic
+    disabled: false
   
+    
