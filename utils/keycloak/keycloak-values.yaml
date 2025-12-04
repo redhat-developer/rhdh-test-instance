@@ -4,8 +4,13 @@ global:
 
 replicaCount: 1
 
-# Use Bitnami's default Keycloak image
-# image section can be removed to use defaults
+# Use Bitnami legacy repository (Bitnami images moved to bitnamilegacy as of Aug 2025)
+# Note: Legacy images are not updated/maintained. Consider migrating to official Keycloak image for long-term.
+image:
+  registry: docker.io
+  repository: bitnamilegacy/keycloak
+  tag: "26.3.3-debian-12-r0"
+  pullPolicy: IfNotPresent
 
 auth:
   adminUser: admin
@@ -27,18 +32,34 @@ ingress:
 
 postgresql:
   enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: "17.6.0-debian-12-r4"
+    pullPolicy: IfNotPresent
   auth:
     postgresPassword: postgres123
     username: keycloak
     password: keycloak123
     database: keycloak
+  primary:
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    persistence:
+      enabled: true
+      size: 1Gi
 
 resources:
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 1000m
+    memory: 1Gi
   requests:
-    cpu: 250m
+    cpu: 100m
     memory: 256Mi
 
 extraEnvVars:
@@ -54,6 +75,25 @@ extraEnvVars:
     value: "true"
   - name: KC_PROXY
     value: "edge"
+  - name: JAVA_OPTS_APPEND
+    value: "-Djava.net.preferIPv4Stack=true -Xms256m -Xmx512m"
+
+# Increase probe timeouts for slower startup on resource-constrained clusters
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 120
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
 
 # Remove the custom command to use Bitnami defaults
 # command:
