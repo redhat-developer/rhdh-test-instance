@@ -31,7 +31,7 @@ fi
 
 # Deploy Keycloak with users and roles.
 # comment this out if you don't want to deploy Keycloak or use your own Keycloak instance.
-source utils/keycloak/keycloak-deploy.sh $namespace
+# source utils/keycloak/keycloak-deploy.sh $namespace
 
 [[ "${OPENSHIFT_CI}" != "true" ]] && source .env
 # source utils/utils.sh
