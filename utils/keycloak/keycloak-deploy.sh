@@ -37,35 +37,74 @@ fi
 
 # Deploy Keycloak using Helm
 if [ "$SKIP_DEPLOYMENT" != "true" ]; then
-  echo -e "${YELLOW}Deploying Keycloak with Helm...${NC}"
-  
-  # Try deployment with retries
-  MAX_RETRIES=2
-  RETRY_COUNT=0
-  
-  while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
-      --namespace $NAMESPACE \
-      --values utils/keycloak/keycloak-values.yaml \
-      --wait --timeout=20m; then
-      echo -e "${GREEN}✅ Keycloak deployed successfully${NC}"
+  echo -e "${YELLOW}Deploying Keycloak with Helm (without --wait for faster feedback)...${NC}"
+
+  # Deploy without --wait first to avoid timeout issues
+  if ! helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
+    --namespace $NAMESPACE \
+    --values utils/keycloak/keycloak-values.yaml \
+    --timeout=5m; then
+    echo -e "${RED}❌ Helm install command failed${NC}"
+    exit 1
+  fi
+
+  echo -e "${GREEN}✅ Helm release created successfully${NC}"
+
+  # Wait for PostgreSQL to be ready first (Keycloak depends on it)
+  echo -e "${YELLOW}Waiting for PostgreSQL to be ready...${NC}"
+  POSTGRES_READY=false
+  for i in $(seq 1 60); do
+    if kubectl get pod -n $NAMESPACE keycloak-postgresql-0 -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null | grep -q "true"; then
+      echo -e "${GREEN}✅ PostgreSQL is ready${NC}"
+      POSTGRES_READY=true
       break
-    else
-      RETRY_COUNT=$((RETRY_COUNT + 1))
-      if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-        echo -e "${YELLOW}⚠️  Deployment attempt $RETRY_COUNT failed. Retrying in 30 seconds...${NC}"
-        sleep 30
-      else
-        echo -e "${RED}❌ Helm deployment failed after $MAX_RETRIES attempts. Checking pod status...${NC}"
-        kubectl get pods -n $NAMESPACE
-        echo -e "${YELLOW}Pod descriptions:${NC}"
-        kubectl describe pods -n $NAMESPACE -l app.kubernetes.io/name=keycloak
-        echo -e "${YELLOW}Recent logs:${NC}"
-        kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=keycloak --tail=50 --all-containers=true || true
+    fi
+    echo "Waiting for PostgreSQL... attempt $i/60"
+    sleep 10
+  done
+
+  if [ "$POSTGRES_READY" != "true" ]; then
+    echo -e "${RED}❌ PostgreSQL failed to become ready. Checking status...${NC}"
+    kubectl get pods -n $NAMESPACE
+    kubectl describe pod -n $NAMESPACE keycloak-postgresql-0 || true
+    kubectl logs -n $NAMESPACE keycloak-postgresql-0 --tail=30 || true
+    exit 1
+  fi
+
+  # Now wait for Keycloak to be ready
+  echo -e "${YELLOW}Waiting for Keycloak to be ready...${NC}"
+  KEYCLOAK_READY=false
+  for i in $(seq 1 60); do
+    if kubectl get pod -n $NAMESPACE keycloak-0 -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null | grep -q "true"; then
+      echo -e "${GREEN}✅ Keycloak is ready${NC}"
+      KEYCLOAK_READY=true
+      break
+    fi
+
+    # Check if pod is in CrashLoopBackOff and show logs
+    POD_STATUS=$(kubectl get pod -n $NAMESPACE keycloak-0 -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
+    if [ "$POD_STATUS" = "CrashLoopBackOff" ]; then
+      RESTART_COUNT=$(kubectl get pod -n $NAMESPACE keycloak-0 -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null)
+      if [ "$RESTART_COUNT" -gt 5 ]; then
+        echo -e "${RED}❌ Keycloak is in CrashLoopBackOff with $RESTART_COUNT restarts${NC}"
+        kubectl logs -n $NAMESPACE keycloak-0 --tail=50 || true
         exit 1
       fi
     fi
+
+    echo "Waiting for Keycloak... attempt $i/60"
+    sleep 10
   done
+
+  if [ "$KEYCLOAK_READY" != "true" ]; then
+    echo -e "${RED}❌ Keycloak failed to become ready. Checking status...${NC}"
+    kubectl get pods -n $NAMESPACE
+    kubectl describe pod -n $NAMESPACE keycloak-0 || true
+    kubectl logs -n $NAMESPACE keycloak-0 --tail=50 || true
+    exit 1
+  fi
+
+  echo -e "${GREEN}✅ Keycloak deployed and ready${NC}"
 fi
 
 # Create OpenShift Route
@@ -89,9 +128,9 @@ spec:
   wildcardPolicy: None
 EOF
 
-# Wait for Keycloak to be ready
-echo -e "${YELLOW}Waiting for Keycloak to be ready...${NC}"
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=keycloak -n $NAMESPACE --timeout=300s
+# Verify Keycloak pod is still ready
+echo -e "${YELLOW}Verifying Keycloak pod status...${NC}"
+kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=keycloak
 
 # Get Keycloak URL from OpenShift Route
 echo -e "${YELLOW}Getting Keycloak Route URL...${NC}"
