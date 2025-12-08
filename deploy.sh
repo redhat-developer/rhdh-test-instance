@@ -2,7 +2,7 @@
 set -e
 
 # Default values
-namespace="rhdh2"
+namespace="rhdh"
 installation_method=""
 CV=""
 github=0 # by default don't use the Github repo unless the chart doesn't exist in the OCI registry
