@@ -58,6 +58,10 @@ jq empty "$CLIENT_FILE" 2>/dev/null || { echo "Error: Invalid JSON in $CLIENT_FI
 echo "Creating namespace $NAMESPACE..."
 oc create namespace $NAMESPACE --dry-run=client -o yaml | oc apply -f -
 
+echo "Adding Bitnami Helm repository..."
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
 echo "Deploying Keycloak..."
 helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
   --namespace $NAMESPACE \
