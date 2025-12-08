@@ -1,3 +1,4 @@
 .env
 operator/install-rhdh-catalog-source.sh
 .DS_Store
+.claude/

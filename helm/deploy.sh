@@ -37,7 +37,7 @@ fi
 echo "Using ${CHART_URL} to install Helm chart"
 
 # RHDH URL
-export RHDH_BASE_URL="https://redhat-developer-hub-${namespace}.${CLUSTER_ROUTER_BASE}"
+export RHDH_BASE_URL="http://redhat-developer-hub-${namespace}.${CLUSTER_ROUTER_BASE}"
 
 # Apply secrets
 envsubst < config/rhdh-secrets.yaml | oc apply -f - --namespace="$namespace"

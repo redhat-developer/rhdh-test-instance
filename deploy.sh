@@ -2,7 +2,7 @@
 set -e
 
 # Default values
-namespace="rhdh"
+namespace="rhdh2"
 installation_method=""
 CV=""
 github=0 # by default don't use the Github repo unless the chart doesn't exist in the OCI registry
@@ -54,7 +54,7 @@ else
 fi
 
 # Wait for the deployment to be ready
-oc rollout status deployment -l app.kubernetes.io/instance=developer-hub -n "$namespace" --timeout=300s || echo "Error: Timed out waiting for deployment to be ready."
+oc rollout status deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' -n "$namespace" --timeout=300s || echo "Error: Timed out waiting for deployment to be ready."
 
 echo "
 RHDH_BASE_URL : 

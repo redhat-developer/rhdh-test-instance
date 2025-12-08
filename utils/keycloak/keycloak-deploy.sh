@@ -1,75 +1,73 @@
 #!/bin/bash
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Check for required dependencies
+command -v jq >/dev/null 2>&1 || { echo "Error: jq is required but not installed"; exit 1; }
+command -v oc >/dev/null 2>&1 || { echo "Error: oc (OpenShift CLI) is required but not installed"; exit 1; }
 
 NAMESPACE=${1:-rhdh-keycloak}
+USERS_FILE=${2:-utils/keycloak/users.json}
+GROUPS_FILE=${3:-utils/keycloak/groups.json}
+CLIENT_FILE="utils/keycloak/rhdh-client.json"
 KEYCLOAK_RELEASE_NAME="keycloak"
 
-echo -e "${GREEN}🚀 Starting Keycloak deployment on OpenShift...${NC}"
+# Helper function for API calls with error checking
+api_call() {
+  local method=$1
+  local url=$2
+  local data=$3
+  local description=$4
 
-# Add Bitnami Helm repository (for Keycloak chart)
-echo -e "${YELLOW}Adding Bitnami Helm repository...${NC}"
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo update
-
-# Create namespace if it doesn't exist
-echo -e "${YELLOW}Creating namespace: $NAMESPACE${NC}"
-kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-
-# Check if Keycloak is already deployed and healthy
-if helm list -n $NAMESPACE | grep -q "^$KEYCLOAK_RELEASE_NAME"; then
-  echo -e "${YELLOW}Keycloak is already deployed. Checking health...${NC}"
-  if kubectl get pods -n $NAMESPACE -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
-    echo -e "${GREEN}✅ Keycloak is already running and healthy. Skipping deployment.${NC}"
-    SKIP_DEPLOYMENT=true
+  if [ -n "$data" ]; then
+    RESPONSE=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$data")
   else
-    echo -e "${YELLOW}Keycloak exists but is not healthy. Redeploying...${NC}"
-    SKIP_DEPLOYMENT=false
+    RESPONSE=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json")
   fi
-else
-  SKIP_DEPLOYMENT=false
-fi
 
-# Deploy Keycloak using Helm
-if [ "$SKIP_DEPLOYMENT" != "true" ]; then
-  echo -e "${YELLOW}Deploying Keycloak with Helm...${NC}"
-  
-  # Try deployment with retries
-  MAX_RETRIES=2
-  RETRY_COUNT=0
-  
-  while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
-      --namespace $NAMESPACE \
-      --values utils/keycloak/keycloak-values.yaml \
-      --wait --timeout=20m; then
-      echo -e "${GREEN}✅ Keycloak deployed successfully${NC}"
-      break
-    else
-      RETRY_COUNT=$((RETRY_COUNT + 1))
-      if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-        echo -e "${YELLOW}⚠️  Deployment attempt $RETRY_COUNT failed. Retrying in 30 seconds...${NC}"
-        sleep 30
-      else
-        echo -e "${RED}❌ Helm deployment failed after $MAX_RETRIES attempts. Checking pod status...${NC}"
-        kubectl get pods -n $NAMESPACE
-        echo -e "${YELLOW}Pod descriptions:${NC}"
-        kubectl describe pods -n $NAMESPACE -l app.kubernetes.io/name=keycloak
-        echo -e "${YELLOW}Recent logs:${NC}"
-        kubectl logs -n $NAMESPACE -l app.kubernetes.io/name=keycloak --tail=50 --all-containers=true || true
-        exit 1
-      fi
-    fi
-  done
-fi
+  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+  BODY=$(echo "$RESPONSE" | sed '$d')
+
+  if [ "$method" = "GET" ] || [ "$HTTP_CODE" -lt 400 ]; then
+    echo "$BODY"
+    return 0
+  fi
+
+  # 409 Conflict is acceptable for create operations (already exists)
+  if [ "$HTTP_CODE" = "409" ]; then
+    echo "Warning: $description - already exists (continuing)" >&2
+    echo "$BODY"
+    return 0
+  fi
+
+  echo "Error: $description failed (HTTP $HTTP_CODE): $BODY" >&2
+  return 1
+}
+
+# Validate JSON files exist and are valid
+[ ! -f "$CLIENT_FILE" ] && echo "Error: Client configuration file not found: $CLIENT_FILE" && exit 1
+jq empty "$CLIENT_FILE" 2>/dev/null || { echo "Error: Invalid JSON in $CLIENT_FILE"; exit 1; }
+[ -f "$USERS_FILE" ] && { jq empty "$USERS_FILE" 2>/dev/null || { echo "Error: Invalid JSON in $USERS_FILE"; exit 1; }; }
+[ -f "$GROUPS_FILE" ] && { jq empty "$GROUPS_FILE" 2>/dev/null || { echo "Error: Invalid JSON in $GROUPS_FILE"; exit 1; }; }
+
+# Create namespace and deploy Keycloak
+echo "Creating namespace $NAMESPACE..."
+oc create namespace $NAMESPACE --dry-run=client -o yaml | oc apply -f -
+
+echo "Deploying Keycloak..."
+helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
+  --namespace $NAMESPACE \
+  --values utils/keycloak/keycloak-values.yaml
+
+echo "Waiting for Keycloak rollout..."
+oc rollout status statefulset/keycloak -n $NAMESPACE --timeout=5m
 
 # Create OpenShift Route
-echo -e "${YELLOW}Creating OpenShift Route...${NC}"
+echo "Creating OpenShift Route..."
 cat <<EOF | kubectl apply -f -
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -89,186 +87,116 @@ spec:
   wildcardPolicy: None
 EOF
 
-# Wait for Keycloak to be ready
-echo -e "${YELLOW}Waiting for Keycloak to be ready...${NC}"
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=keycloak -n $NAMESPACE --timeout=300s
+KEYCLOAK_URL="http://$(oc get route keycloak -n $NAMESPACE -o jsonpath='{.spec.host}')"
+[ -z "$KEYCLOAK_URL" ] || [ "$KEYCLOAK_URL" = "http://" ] && echo "Error: Failed to get Keycloak route" && exit 1
+echo "Keycloak URL: $KEYCLOAK_URL"
 
-# Get Keycloak URL from OpenShift Route
-echo -e "${YELLOW}Getting Keycloak Route URL...${NC}"
-KEYCLOAK_HOST=$(kubectl get route $KEYCLOAK_RELEASE_NAME -n $NAMESPACE -o jsonpath='{.spec.host}')
-KEYCLOAK_URL="http://$KEYCLOAK_HOST"
-
-echo -e "${GREEN}Keycloak is accessible at: $KEYCLOAK_URL${NC}"
-
-# Wait for Keycloak to be fully initialized
-echo -e "${YELLOW}Waiting for Keycloak to be fully initialized...${NC}"
-sleep 60
-
-# Configure Keycloak using REST API
-echo -e "${YELLOW}Configuring Keycloak...${NC}"
-
-# Wait for Keycloak to be accessible
-echo -e "${YELLOW}Waiting for Keycloak to be accessible...${NC}"
-for i in $(seq 1 30); do
-  if curl -s "$KEYCLOAK_URL/realms/master" > /dev/null 2>&1; then
-    echo -e "${GREEN}Keycloak is accessible${NC}"
+# Wait for Keycloak API to be ready (check for HTTP 200, not just connection)
+echo "Waiting for Keycloak API..."
+TIMEOUT=300
+ELAPSED=0
+while true; do
+  HTTP_STATUS=$(curl -sk -o /dev/null -w "%{http_code}" "$KEYCLOAK_URL/realms/master" 2>/dev/null || echo "000")
+  if [ "$HTTP_STATUS" = "200" ]; then
     break
   fi
-  echo "Waiting... attempt $i/30"
-  sleep 10
+  sleep 5
+  ELAPSED=$((ELAPSED + 5))
+  if [ $ELAPSED -ge $TIMEOUT ]; then
+    echo "Error: Keycloak API not ready after 5 minutes (last status: $HTTP_STATUS)"
+    exit 1
+  fi
+  echo "  Waiting... (status: $HTTP_STATUS)"
 done
 
 # Get admin token
-echo -e "${YELLOW}Getting admin token...${NC}"
-ADMIN_TOKEN=$(curl -s -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=admin" \
-  -d "password=admin123" \
-  -d "grant_type=password" \
-  -d "client_id=admin-cli" | \
-  sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+TOKEN_RESPONSE=$(curl -sk -w "\n%{http_code}" -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+  -d "username=admin&password=admin123&grant_type=password&client_id=admin-cli")
+TOKEN_HTTP_CODE=$(echo "$TOKEN_RESPONSE" | tail -1)
+TOKEN_BODY=$(echo "$TOKEN_RESPONSE" | sed '$d')
+[ "$TOKEN_HTTP_CODE" -ge 400 ] && echo "Error: Failed to get admin token (HTTP $TOKEN_HTTP_CODE): $TOKEN_BODY" && exit 1
+ADMIN_TOKEN=$(echo "$TOKEN_BODY" | jq -r '.access_token // empty')
+[ -z "$ADMIN_TOKEN" ] && echo "Error: Failed to parse admin token" && exit 1
 
-if [ -z "$ADMIN_TOKEN" ]; then
-  echo -e "${RED}Failed to get admin token${NC}"
-  exit 1
+# Create realm and client
+echo "Creating realm 'rhdh'..."
+api_call POST "$KEYCLOAK_URL/admin/realms" \
+  '{"realm":"rhdh","enabled":true,"displayName":"RHDH Realm"}' \
+  "Create realm" >/dev/null
+
+echo "Creating client..."
+api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/clients" \
+  "$(jq -c '.' "$CLIENT_FILE")" \
+  "Create client" >/dev/null
+
+# Get IDs for role assignment
+SERVICE_ACCOUNT_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/users?username=service-account-rhdh-client" "" "Get service account" | \
+  jq -r '.[0].id // empty')
+[ -z "$SERVICE_ACCOUNT_ID" ] && echo "Error: Service account not found" && exit 1
+
+REALM_MGMT_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients?clientId=realm-management" "" "Get realm-management client" | \
+  jq -r '.[0].id // empty')
+[ -z "$REALM_MGMT_ID" ] && echo "Error: realm-management client not found" && exit 1
+
+ROLES=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$REALM_MGMT_ID/roles" "" "Get roles" | \
+  jq -c '[.[] | select(.name == "view-authorization" or .name == "manage-authorization" or .name == "view-users")]')
+[ -z "$ROLES" ] || [ "$ROLES" = "[]" ] && echo "Error: Required roles not found" && exit 1
+
+echo "Assigning service account roles..."
+api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/users/$SERVICE_ACCOUNT_ID/role-mappings/clients/$REALM_MGMT_ID" \
+  "$ROLES" \
+  "Assign roles" >/dev/null
+
+# Create groups
+if [ -f "$GROUPS_FILE" ]; then
+  echo "Creating groups..."
+  jq -r '.[].name' "$GROUPS_FILE" | while read -r group; do
+    api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/groups" \
+      "{\"name\":\"$group\"}" \
+      "Create group '$group'" >/dev/null && echo "  Created group: $group" || echo "  Warning: Failed to create group: $group"
+  done
 fi
 
-echo -e "${GREEN}Got admin token, creating realm...${NC}"
+# Create users
+if [ -f "$USERS_FILE" ]; then
+  echo "Creating users..."
 
-# Create realm with proper configuration
-curl -s -X POST "$KEYCLOAK_URL/admin/realms" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "realm": "rhdh",
-    "enabled": true,
-    "displayName": "RHDH Realm",
-    "loginTheme": "keycloak",
-    "accessTokenLifespan": 300,
-    "accessTokenLifespanForImplicitFlow": 900,
-    "ssoSessionIdleTimeout": 1800,
-    "ssoSessionMaxLifespan": 36000,
-    "offlineSessionIdleTimeout": 2592000,
-    "offlineSessionMaxLifespan": 5184000,
-    "accessCodeLifespan": 60,
-    "accessCodeLifespanUserAction": 300,
-    "accessCodeLifespanLogin": 1800,
-    "actionTokenGeneratedByAdminLifespan": 43200,
-    "actionTokenGeneratedByUserLifespan": 300,
-    "oauth2DeviceCodeLifespan": 600,
-    "oauth2DevicePollingInterval": 5,
-    "attributes": {
-      "userInfoEndpoint": "true"
-    }
-  }'
+  jq -c '.[]' "$USERS_FILE" | while read -r user_json; do
+    username=$(echo "$user_json" | jq -r '.username')
+    groups=$(echo "$user_json" | jq -r '.groups // [] | join(",")')
+    user_payload=$(echo "$user_json" | jq -c 'del(.groups)')
 
-echo -e "${GREEN}Realm created, creating client...${NC}"
+    if ! api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/users" "$user_payload" "Create user '$username'" >/dev/null; then
+      echo "  Warning: Failed to create user: $username"
+      continue
+    fi
+    echo "  Created user: $username"
 
-# Create client by importing from JSON file
-curl -s -X POST "$KEYCLOAK_URL/admin/realms/rhdh/clients" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d @utils/keycloak/rhdh-client.json
+    # Add user to groups
+    if [ -n "$groups" ]; then
+      USER_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/users?username=$username" "" "Get user ID" | \
+        jq -r '.[0].id // empty')
+      [ -z "$USER_ID" ] && echo "    Warning: Could not get user ID, skipping groups" && continue
 
-echo -e "${GREEN}Client created, assigning service account role...${NC}"
-
-# Wait for service account to be created
-sleep 5
-
-# Assign realm-management roles to the service account
-echo -e "${YELLOW}Assigning realm-management roles to service account...${NC}"
-
-SERVICE_ACCOUNT_USER_ID=$(curl -s -X GET "$KEYCLOAK_URL/admin/realms/rhdh/users?username=service-account-rhdh-client" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
-
-if [ -z "$SERVICE_ACCOUNT_USER_ID" ]; then
-    echo -e "${RED}Failed to get service account user ID for service-account-rhdh-client.${NC}"
-    exit 1
+      for group in $(echo "$groups" | tr ',' ' '); do
+        GROUP_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/groups?search=$group" "" "Get group ID" | \
+          jq -r '.[0].id // empty')
+        [ -z "$GROUP_ID" ] && echo "    Warning: Group '$group' not found" && continue
+        api_call PUT "$KEYCLOAK_URL/admin/realms/rhdh/users/$USER_ID/groups/$GROUP_ID" "" "Add to group" >/dev/null \
+          && echo "    Added to group: $group" || echo "    Warning: Failed to add to group: $group"
+      done
+    fi
+  done
 fi
 
-REALM_MANAGEMENT_CLIENT_ID=$(curl -s -X GET "$KEYCLOAK_URL/admin/realms/rhdh/clients?clientId=realm-management" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+echo ""
+echo "========================================="
+echo "Keycloak deployment complete"
+echo "========================================="
+echo "URL: $KEYCLOAK_URL"
+echo "Admin: admin/admin123"
+echo "Realm: rhdh"
 
-if [ -z "$REALM_MANAGEMENT_CLIENT_ID" ]; then
-    echo -e "${RED}Failed to get realm-management client ID.${NC}"
-    exit 1
-fi
-
-VIEW_AUTH_ROLE=$(curl -s -X GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$REALM_MANAGEMENT_CLIENT_ID/roles/view-authorization" -H "Authorization: Bearer $ADMIN_TOKEN")
-MANAGE_AUTH_ROLE=$(curl -s -X GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$REALM_MANAGEMENT_CLIENT_ID/roles/manage-authorization" -H "Authorization: Bearer $ADMIN_TOKEN")
-VIEW_USERS_ROLE=$(curl -s -X GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$REALM_MANAGEMENT_CLIENT_ID/roles/view-users" -H "Authorization: Bearer $ADMIN_TOKEN")
-
-curl -s -X POST "$KEYCLOAK_URL/admin/realms/rhdh/users/$SERVICE_ACCOUNT_USER_ID/role-mappings/clients/$REALM_MANAGEMENT_CLIENT_ID" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "[$VIEW_AUTH_ROLE, $MANAGE_AUTH_ROLE, $VIEW_USERS_ROLE]"
-
-echo -e "${GREEN}Assigned 'view-authorization', 'manage-authorization' and 'view-users' to service-account-rhdh-client.${NC}"
-
-echo -e "${GREEN}Creating users...${NC}"
-
-# Create first user (rhdhtest1)
-curl -s -X POST "$KEYCLOAK_URL/admin/realms/rhdh/users" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "test1",
-    "enabled": true,
-    "email": "test1@redhat.com",
-    "firstName": "test1", 
-    "lastName": "lastname1",
-    "emailVerified": true,
-    "attributes": {
-      "locale": ["en"]
-    },
-    "credentials": [{
-      "type": "password",
-      "value": "test1@123",
-      "temporary": false
-    }]
-  }'
-
-# Create second user (rhdhtest2)
-curl -s -X POST "$KEYCLOAK_URL/admin/realms/rhdh/users" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "test2",
-    "enabled": true,
-    "email": "test2@redhat.com",
-    "firstName": "test2",
-    "lastName": "lastname2",
-    "emailVerified": true,
-    "attributes": {
-      "locale": ["en"]
-    },
-    "credentials": [{
-      "type": "password",
-      "value": "test2@123",
-      "temporary": false
-    }]
-  }'
-
-echo -e "${GREEN}Configuration completed successfully!${NC}"
-
-# Test the realm configuration
-echo -e "${YELLOW}Testing realm configuration...${NC}"
-if curl -s "$KEYCLOAK_URL/realms/rhdh/.well-known/openid_configuration" | head -c 100 > /dev/null; then
-  echo -e "${GREEN}Realm configuration test completed successfully.${NC}"
-else
-  echo -e "${YELLOW}Realm configuration test warning (but likely still working).${NC}"
-fi
-
-echo -e "${GREEN}✅ Keycloak deployment completed successfully!${NC}"
-echo -e "${GREEN}Keycloak URL: $KEYCLOAK_URL${NC}"
-echo -e "${GREEN}Admin Console: $KEYCLOAK_URL/admin${NC}"
-echo -e "${GREEN}Admin Username: admin${NC}"
-echo -e "${GREEN}Admin Password: admin123${NC}"
-echo -e "${GREEN}Users created: rhdhtest1, rhdhtest2${NC}"
-echo -e "${GREEN}User Password: rhdhtest@123${NC}"
-echo -e "${GREEN}Realm: rhdh${NC}"
-
-# export environment variables
 export KEYCLOAK_CLIENT_SECRET="rhdh-client-secret"
 export KEYCLOAK_CLIENT_ID="rhdh-client"
 export KEYCLOAK_REALM="rhdh"
