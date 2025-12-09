@@ -15,7 +15,7 @@ chmod +x install-rhdh-catalog-source.sh
 ./install-rhdh-catalog-source.sh -v $version --install-operator rhdh
 rm install-rhdh-catalog-source.sh
 
-export RHDH_BASE_URL="https://backstage-developer-hub-${namespace}.${CLUSTER_ROUTER_BASE}"
+export RHDH_BASE_URL="http://backstage-developer-hub-${namespace}.${CLUSTER_ROUTER_BASE}"
 
 # Apply secrets
 envsubst < config/rhdh-secrets.yaml | oc apply -f - --namespace="$namespace"
