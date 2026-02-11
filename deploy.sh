@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-
+echo "Just a test PR"
 # Default values
 namespace="rhdh"
 installation_method=""
