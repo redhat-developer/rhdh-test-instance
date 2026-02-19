@@ -20,6 +20,8 @@ spec:
           value: "${RHDH_BASE_URL}"
         - name: CATALOG_INDEX_IMAGE
           value: "quay.io/rhdh/plugin-catalog-index:${CATALOG_INDEX_TAG}"
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
       secrets:
         - name: rhdh-secrets
   database:

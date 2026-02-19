@@ -12,3 +12,6 @@ upstream:
         filename: app-config-rhdh.yaml
     extraEnvVarsSecrets:
       - rhdh-secrets
+    extraEnvVars:
+      - name: NODE_TLS_REJECT_UNAUTHORIZED
+        value: "0"
