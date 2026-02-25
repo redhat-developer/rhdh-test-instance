@@ -70,38 +70,12 @@ helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
 echo "Waiting for Keycloak rollout..."
 oc rollout status statefulset/keycloak -n $NAMESPACE --timeout=5m
 
-# Detect TLS based on cluster route configuration
-if oc get route console -n openshift-console -o=jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
-    KEYCLOAK_PROTOCOL="https"
-else
-    KEYCLOAK_PROTOCOL="http"
-fi
+# Use plain HTTP route for Keycloak to avoid self-signed certificate issues
+# when RHDH (Node.js) connects to Keycloak's OIDC endpoints
+KEYCLOAK_PROTOCOL="http"
 
-# Create OpenShift Route
+# Create OpenShift Route (plain HTTP, no TLS)
 echo "Creating OpenShift Route (protocol: $KEYCLOAK_PROTOCOL)..."
-if [ "$KEYCLOAK_PROTOCOL" = "https" ]; then
-cat <<EOF | kubectl apply -f -
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: $KEYCLOAK_RELEASE_NAME
-  namespace: $NAMESPACE
-  labels:
-    app.kubernetes.io/name: keycloak
-    app.kubernetes.io/instance: $KEYCLOAK_RELEASE_NAME
-spec:
-  to:
-    kind: Service
-    name: $KEYCLOAK_RELEASE_NAME
-    weight: 100
-  port:
-    targetPort: http
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
-  wildcardPolicy: None
-EOF
-else
 cat <<EOF | kubectl apply -f -
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -120,7 +94,6 @@ spec:
     targetPort: http
   wildcardPolicy: None
 EOF
-fi
 
 KEYCLOAK_URL="${KEYCLOAK_PROTOCOL}://$(oc get route keycloak -n $NAMESPACE -o jsonpath='{.spec.host}')"
 [ -z "$KEYCLOAK_URL" ] || [ "$KEYCLOAK_URL" = "${KEYCLOAK_PROTOCOL}://" ] && echo "Error: Failed to get Keycloak route" && exit 1

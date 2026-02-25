@@ -89,7 +89,7 @@ else
 fi
 
 # Wait for the deployment to be ready
-oc rollout status deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' -n "$namespace" --timeout=300s || echo "Error: Timed out waiting for deployment to be ready."
+oc rollout status deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' -n "$namespace" --timeout=500s || echo "Error: Timed out waiting for deployment to be ready."
 
 echo "
 RHDH_BASE_URL : 
