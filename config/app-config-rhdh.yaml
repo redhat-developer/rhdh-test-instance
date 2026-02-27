@@ -22,6 +22,10 @@ auth:
           resolvers:
             - resolver: emailLocalPartMatchingUserEntityName
 signInPage: oidc
+jira:
+  product: cloud
+  baseUrl: ${JIRA_URL}
+  token: ${JIRA_TOKEN}
 catalog:
   import:
     entityFilename: catalog-info.yaml
