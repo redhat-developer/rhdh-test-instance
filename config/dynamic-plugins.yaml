@@ -9,9 +9,9 @@ plugins:
   # Scorecard backend module - GitHub
   - package: 'oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/red-hat-developer-hub-backstage-plugin-scorecard-backend-module-github:bs_1.45.3__2.3.5!red-hat-developer-hub-backstage-plugin-scorecard-backend-module-github'
     disabled: false
-  # Scorecard backend module - Jira
+  # Scorecard backend module - Jira (disabled - requires JIRA_URL and JIRA_TOKEN)
   - package: 'oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/red-hat-developer-hub-backstage-plugin-scorecard-backend-module-jira:bs_1.45.3__2.3.5!red-hat-developer-hub-backstage-plugin-scorecard-backend-module-jira'
-    disabled: false
+    disabled: true
   # Scorecard frontend
   - package: 'oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/red-hat-developer-hub-backstage-plugin-scorecard:bs_1.45.3__2.3.5!red-hat-developer-hub-backstage-plugin-scorecard'
     disabled: false
