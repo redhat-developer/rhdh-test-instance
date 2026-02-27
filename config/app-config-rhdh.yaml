@@ -22,6 +22,10 @@ auth:
           resolvers:
             - resolver: emailLocalPartMatchingUserEntityName
 signInPage: oidc
+integrations:
+  github:
+    - host: github.com
+      token: ${GH_BOT_PAT}
 catalog:
   import:
     entityFilename: catalog-info.yaml
@@ -34,6 +38,8 @@ catalog:
       target: https://github.com/redhat-developer/rhdh/blob/main/catalog-entities/all.yaml
     - type: url
       target: https://github.com/redhat-developer/red-hat-developer-hub-software-templates/blob/main/templates.yaml
+    - type: url
+      target: https://github.com/backstage/backstage/blob/master/catalog-info.yaml
   providers:
     keycloakOrg:
       default:
