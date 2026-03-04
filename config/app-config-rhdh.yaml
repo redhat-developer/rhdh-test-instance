@@ -1,4 +1,5 @@
 app:
+  title: Test GF
   baseUrl: "${RHDH_BASE_URL}"
 backend:
   baseUrl: "${RHDH_BASE_URL}"
