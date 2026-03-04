@@ -46,3 +46,35 @@ catalog:
           frequency: { minutes: 20 }
           initialDelay: { seconds: 15 }
           timeout: { minutes: 5 }
+
+# GitHub integration for Scorecard plugin (configure one of the options below)
+# Option 1: Token-based authentication
+# integrations:
+#   github:
+#     - host: github.com
+#       token: ${GITHUB_TOKEN}
+
+# Option 2: GitHub App authentication (recommended for organizations)
+# integrations:
+#   github:
+#     - host: github.com
+#       apps:
+#         - appId: ${GITHUB_APP_ID}
+#           clientId: ${GITHUB_CLIENT_ID}
+#           clientSecret: ${GITHUB_CLIENT_SECRET}
+#           privateKey: |
+#             ${GITHUB_PRIVATE_KEY}
+
+# Scorecard GitHub metrics thresholds
+scorecard:
+  plugins:
+    github:
+      open_prs:
+        thresholds:
+          rules:
+            - key: success
+              expression: '<10'
+            - key: warning
+              expression: '10-50'
+            - key: error
+              expression: '>50'
