@@ -11,17 +11,16 @@ auth:
   session:
     secret: superSecretSecret 
   providers:
-    oidc:
+    github:
       production:
-        metadataUrl: "${KEYCLOAK_METADATA_URL}"
-        clientId: "${KEYCLOAK_CLIENT_ID}"
-        clientSecret: "${KEYCLOAK_CLIENT_SECRET}"
-        prompt: auto
-        callbackUrl: "${RHDH_BASE_URL}/api/auth/oidc/handler/frame"
+        clientSecret: ${GITHUB_OAUTH_APP_SECRET}
+        clientId: ${GITHUB_OAUTH_APP_ID}
+        callbackUrl: ${RHDH_BASE_URL}/api/auth/github/handler/frame
         signIn:
           resolvers:
-            - resolver: emailLocalPartMatchingUserEntityName
-signInPage: oidc
+            - resolver: usernameMatchingUserEntityName
+              dangerouslyAllowSignInWithoutUserInCatalog: true
+signInPage: github
 catalog:
   import:
     entityFilename: catalog-info.yaml
