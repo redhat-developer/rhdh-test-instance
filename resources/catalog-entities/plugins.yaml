@@ -1,0 +1,20 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: plugins-config-map
+  labels:
+    backstage.io/kubernetes-id: developer-hub
+data:
+  plugins.yaml: |
+    apiVersion: backstage.io/v1alpha1
+    kind: Location
+    metadata:
+      name: plugin-locations
+      description: A collection of all plugin related catalog entities
+    spec:
+      type: url
+      targets:
+        - https://github.com/backstage/community-plugins/blob/main/workspaces/keycloak/plugins/catalog-backend-module-keycloak/catalog-info.yaml
+        - https://github.com/backstage/community-plugins/blob/main/workspaces/lighthouse/plugins/lighthouse/catalog-info.yaml
+        - https://github.com/backstage/community-plugins/blob/main/workspaces/sonarqube/plugins/sonarqube/catalog-info.yaml
+        - https://github.com/backstage/community-plugins/blob/main/workspaces/sonarqube/plugins/sonarqube-backend/catalog-info.yaml

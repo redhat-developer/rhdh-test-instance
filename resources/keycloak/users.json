@@ -1,0 +1,552 @@
+[
+  {
+    "username": "ant_man",
+    "firstName": "Scott",
+    "lastName": "Lang",
+    "email": "ant_man@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "hulk",
+    "firstName": "Bruce",
+    "lastName": "Banner",
+    "email": "hulk@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "thor",
+    "firstName": "Thor",
+    "lastName": "Odinson",
+    "email": "thor@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "wasp",
+    "firstName": "Janet",
+    "lastName": "van Dyne",
+    "email": "wasp@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "captain_america",
+    "firstName": "Steve",
+    "lastName": "Rogers",
+    "email": "captain_america@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "hawkeye",
+    "firstName": "Clint",
+    "lastName": "Barton",
+    "email": "hawkeye@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "scarlet_witch",
+    "firstName": "Wanda",
+    "lastName": "Maximoff",
+    "email": "scarlet_witch@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "black_panther",
+    "firstName": "King",
+    "lastName": "T'Challa",
+    "email": "black_panther@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "vision",
+    "firstName": "Roy",
+    "lastName": "Thomas",
+    "email": "vision@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "mantis",
+    "firstName": "Mantis",
+    "lastName": "Brandt",
+    "email": "mantis@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "beast",
+    "firstName": "Hank",
+    "lastName": "McCoy",
+    "email": "beast@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "captain_marvel",
+    "firstName": "Carol",
+    "lastName": "Danvers",
+    "email": "captain_marvel@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "she_hulk",
+    "firstName": "Susan",
+    "lastName": "Walters",
+    "email": "she_hulk@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "thing",
+    "firstName": "Ben",
+    "lastName": "Grim",
+    "email": "thing@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "spiderman",
+    "firstName": "Peter",
+    "lastName": "Parker",
+    "email": "spiderman@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "valkyrie",
+    "firstName": "Brunnhilde",
+    "lastName": "of Asgard",
+    "email": "valkyrie@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "nova",
+    "firstName": "Frankie",
+    "lastName": "Raye",
+    "email": "nova@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "storm",
+    "firstName": "Ororo",
+    "lastName": "Munroe",
+    "email": "storm@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "psylocke",
+    "firstName": "Elizabeth",
+    "lastName": "Braddock",
+    "email": "psylocke@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "penance",
+    "firstName": "Monet",
+    "lastName": "Clarisse",
+    "email": "penance@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "cable",
+    "firstName": "Nathan",
+    "lastName": "Christopher",
+    "email": "cable@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "iron_man",
+    "firstName": "Tony",
+    "lastName": "Stark",
+    "email": "iron_man@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "avengers"
+    ]
+  },
+  {
+    "username": "cyclops",
+    "firstName": "Scott",
+    "lastName": "Summers",
+    "email": "cyclops@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "gambit",
+    "firstName": "Remy",
+    "lastName": "LeBeau",
+    "email": "gambit@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "wolverine",
+    "firstName": "Logan",
+    "lastName": "Howlett",
+    "email": "wolverine@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "professor_x",
+    "firstName": "Charles",
+    "lastName": "Xavier",
+    "email": "professor_x@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-men"
+    ]
+  },
+  {
+    "username": "mister_fantastic",
+    "firstName": "Reed",
+    "lastName": "Richards",
+    "email": "mister_fantastic@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "invisible_woman",
+    "firstName": "Sue",
+    "lastName": "Storm",
+    "email": "invisible_woman@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "human_torch",
+    "firstName": "Johnny",
+    "lastName": "Storm",
+    "email": "human_torch@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "fantastic-four"
+    ]
+  },
+  {
+    "username": "starhawk",
+    "firstName": "Stakar",
+    "lastName": "of the House of Ogord",
+    "email": "starhawk@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "star_lord",
+    "firstName": "Peter",
+    "lastName": "Quill",
+    "email": "star_lord@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "gamora",
+    "firstName": "Gamora",
+    "lastName": "Titan",
+    "email": "gamora@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "drax",
+    "firstName": "Arthur",
+    "lastName": "Douglas",
+    "email": "drax@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "rocket_raccoon",
+    "firstName": "Rocket",
+    "lastName": "Raccoon",
+    "email": "rocket_raccoon@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "adam_warlock",
+    "firstName": "Adam",
+    "lastName": "Warlock",
+    "email": "adam_warlock@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "groot",
+    "firstName": "Groot",
+    "lastName": "Groot",
+    "email": "groot@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "guardians-of-the-galaxy"
+    ]
+  },
+  {
+    "username": "captain_britain",
+    "firstName": "Betsy",
+    "lastName": "Braddock",
+    "email": "captain_britain@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "deadpool",
+    "firstName": "Wade",
+    "lastName": "Wilson",
+    "email": "deadpool@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "colossus",
+    "firstName": "Piotr",
+    "lastName": "Rasputin",
+    "email": "colossus@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "domino",
+    "firstName": "Neena",
+    "lastName": "Thurman",
+    "email": "domino@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "x_23",
+    "firstName": "Laura",
+    "lastName": "Kinney",
+    "email": "x_23@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "marvel_girl",
+    "firstName": "Jean",
+    "lastName": "Grey",
+    "email": "marvel_girl@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "copycat",
+    "firstName": "Vanessa",
+    "lastName": "Carlysle",
+    "email": "copycat@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "bishop",
+    "firstName": "Lucas",
+    "lastName": "Bishop",
+    "email": "bishop@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "x-force"
+    ]
+  },
+  {
+    "username": "doctor_strange",
+    "firstName": "Stephen",
+    "lastName": "Strange",
+    "email": "doctor_strange@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "silver_surfer",
+    "firstName": "Norrin",
+    "lastName": "Radd",
+    "email": "silver_surfer@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "nighthawk",
+    "firstName": "Kyle",
+    "lastName": "Richmond",
+    "email": "nighthawk@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "power_man",
+    "firstName": "Victor",
+    "lastName": "Alvarez",
+    "email": "power_man@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "defenders"
+    ]
+  },
+  {
+    "username": "admin",
+    "firstName": "Admin",
+    "lastName": "Admin",
+    "email": "admin@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "cluster-admins"
+    ]
+  },
+  {
+    "username": "super_user",
+    "firstName": "Super",
+    "lastName": "User",
+    "email": "super_user@example.com",
+    "enabled": true,
+    "emailVerified": true,
+    "groups": [
+      "cluster-admins"
+    ]
+  }
+]

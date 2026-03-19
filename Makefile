@@ -1,6 +1,7 @@
 NAMESPACE ?= rhdh
 VERSION ?= 1.9
 ORCH ?= false
+PLUGINS ?=
 USE_CONTAINER ?= false
 CATALOG_INDEX_TAG ?=
 RUNNER_IMAGE ?= quay.io/rhdh-community/rhdh-e2e-runner:main
@@ -11,6 +12,9 @@ export CATALOG_INDEX_TAG
 DEPLOY_FLAGS = --namespace $(NAMESPACE)
 ifeq ($(ORCH),true)
 DEPLOY_FLAGS += --with-orchestrator
+endif
+ifneq ($(PLUGINS),)
+DEPLOY_FLAGS += --plugins $(PLUGINS)
 endif
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
@@ -36,22 +40,32 @@ endif
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
-.PHONY: undeploy-helm undeploy-operator undeploy-infra clean
+.PHONY: undeploy-helm undeploy-operator undeploy-infra undeploy-plugins clean
 
-undeploy-helm: ## Uninstall Helm RHDH release
-	helm uninstall redhat-developer-hub -n $(NAMESPACE) || true
-	oc delete configmap app-config-rhdh -n $(NAMESPACE) --ignore-not-found
-	oc delete secret rhdh-secrets -n $(NAMESPACE) --ignore-not-found
+undeploy-helm: ## Uninstall Helm RHDH release and all cluster resources (PLUGINS=keycloak,lighthouse to also teardown plugin infra)
+ifdef PLUGINS
+	./teardown.sh helm --namespace $(NAMESPACE) --plugins $(PLUGINS)
+else
+	./teardown.sh helm --namespace $(NAMESPACE)
+endif
 
-undeploy-operator: ## Remove Operator RHDH deployment
-	oc delete backstage developer-hub -n $(NAMESPACE) --ignore-not-found
-	oc delete configmap app-config-rhdh dynamic-plugins -n $(NAMESPACE) --ignore-not-found
-	oc delete secret rhdh-secrets -n $(NAMESPACE) --ignore-not-found
+undeploy-operator: ## Remove Operator RHDH deployment and all cluster resources (PLUGINS=keycloak,lighthouse to also teardown plugin infra)
+ifdef PLUGINS
+	./teardown.sh operator --namespace $(NAMESPACE) --plugins $(PLUGINS)
+else
+	./teardown.sh operator --namespace $(NAMESPACE)
+endif
+
+undeploy-plugins: ## Teardown plugin infrastructure only, leave RHDH running (PLUGINS=keycloak,lighthouse)
+ifndef PLUGINS
+	$(error PLUGINS is required, e.g. make undeploy-plugins PLUGINS=keycloak,lighthouse)
+endif
+	TEARDOWN=true NAMESPACE=$(NAMESPACE) bash scripts/config-plugins.sh $(PLUGINS)
 
 undeploy-infra: ## Uninstall orchestrator infra chart
 	helm uninstall orchestrator-infra -n $(NAMESPACE) || true
 
-clean: ## Delete the entire namespace
+clean: ## Delete the entire namespace (removes everything)
 	oc delete project $(NAMESPACE) --ignore-not-found
 
 # ── Status ────────────────────────────────────────────────────────────────────
