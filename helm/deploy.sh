@@ -11,9 +11,6 @@ namespace="$1"
 version="$2"
 github=0 # by default don't use the Github repo unless the chart doesn't exist in the OCI registry
 
-# Get cluster router base
-export CLUSTER_ROUTER_BASE=$(oc get route console -n openshift-console -o=jsonpath='{.spec.host}' | sed 's/^[^.]*\.//')
-
 # Validate version and determine chart version
 if [[ "$version" =~ ^([0-9]+(\.[0-9]+)?)$ ]]; then
     CV=$(curl -s "https://quay.io/api/v1/repository/rhdh/chart/tag/?onlyActiveTags=true&limit=600" | jq -r '.tags[].name' | grep "^${version}-" | sort -V | tail -n 1)
@@ -44,18 +41,6 @@ fi
 
 echo "Using ${CHART_URL} to install Helm chart"
 
-# RHDH URL
-# Detect protocol based on cluster route TLS configuration
-if oc get route console -n openshift-console -o=jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
-    RHDH_PROTOCOL="https"
-else
-    RHDH_PROTOCOL="http"
-fi
-export RHDH_BASE_URL="${RHDH_PROTOCOL}://redhat-developer-hub-${namespace}.${CLUSTER_ROUTER_BASE}"
-
-# Apply secrets
-envsubst < config/rhdh-secrets.yaml | oc apply -f - --namespace="$namespace"
-
 # Install orchestrator infrastructure if requested
 if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     echo "Installing orchestrator infrastructure chart..."
@@ -83,13 +68,25 @@ if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     echo "Serverless operator pods are running."
 fi
 
-# Build dynamic plugins value file
+# Build dynamic plugins value file.
+# Read from the cluster ConfigMap seeded in deploy.sh and augmented by any
+# plugin setup scripts. Fall back to config/dynamic-plugins.yaml if the
+# ConfigMap is not available (e.g. standalone helm/deploy.sh execution).
 DYNAMIC_PLUGINS_FILE=$(mktemp)
 trap "rm -f $DYNAMIC_PLUGINS_FILE" EXIT
 echo "global:" > "$DYNAMIC_PLUGINS_FILE"
 echo "  dynamic:" >> "$DYNAMIC_PLUGINS_FILE"
 # Escape {{inherit}} for Helm's Go template engine: {{inherit}} -> {{ "{{inherit}}" }}
-sed -e 's/^/    /' -e 's/{{inherit}}/{{ "{{inherit}}" }}/g' config/dynamic-plugins.yaml >> "$DYNAMIC_PLUGINS_FILE"
+if oc get configmap dynamic-plugins --namespace "$namespace" &>/dev/null; then
+    oc get configmap dynamic-plugins \
+        --namespace "$namespace" \
+        -o jsonpath='{.data.dynamic-plugins\.yaml}' \
+        | sed -e 's/^/    /' -e 's/{{inherit}}/{{ "{{inherit}}" }}/g' \
+        >> "$DYNAMIC_PLUGINS_FILE"
+else
+    sed -e 's/^/    /' -e 's/{{inherit}}/{{ "{{inherit}}" }}/g' \
+        config/dynamic-plugins.yaml >> "$DYNAMIC_PLUGINS_FILE"
+fi
 
 # Build helm install arguments
 HELM_ARGS=(
@@ -106,8 +103,15 @@ if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     HELM_ARGS+=(--set orchestrator.enabled=true)
 fi
 
-# Install Helm chart
-helm install redhat-developer-hub "${CHART_URL}" --version "$CV" "${HELM_ARGS[@]}"
+if [[ "${IS_AUTH_ENABLED:-false}" != "true" ]]; then
+    HELM_ARGS+=(
+        --set "upstream.backstage.extraAppConfig[1].configMapRef=app-config-guest-auth"
+        --set "upstream.backstage.extraAppConfig[1].filename=app-config-guest-auth.yaml"
+    )
+fi
+
+# Install or upgrade Helm chart
+helm upgrade --install redhat-developer-hub "${CHART_URL}" --version "$CV" "${HELM_ARGS[@]}"
 
 # Scale down and up to ensure fresh pods (helm does not monitor config changes)
 oc scale deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' --replicas=0 -n "$namespace"

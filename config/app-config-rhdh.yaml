@@ -1,27 +1,22 @@
 app:
-  baseUrl: "${RHDH_BASE_URL}"
+  baseUrl: '${RHDH_BASE_URL}'
 backend:
-  baseUrl: "${RHDH_BASE_URL}"
+  baseUrl: '${RHDH_BASE_URL}'
   cors:
-    origin: "${RHDH_BASE_URL}"
+    origin: '${RHDH_BASE_URL}'
+  csp:
+    connect-src:
+      - "'self'"
+      - 'http:'
+      - 'https:'
+    img-src:
+      - "'self'"
+      - 'data:'
 
 auth:
   # see https://backstage.io/docs/auth/ to learn about auth providers
-  environment: production
   session:
-    secret: superSecretSecret 
-  providers:
-    oidc:
-      production:
-        metadataUrl: "${KEYCLOAK_METADATA_URL}"
-        clientId: "${KEYCLOAK_CLIENT_ID}"
-        clientSecret: "${KEYCLOAK_CLIENT_SECRET}"
-        prompt: auto
-        callbackUrl: "${RHDH_BASE_URL}/api/auth/oidc/handler/frame"
-        signIn:
-          resolvers:
-            - resolver: emailLocalPartMatchingUserEntityName
-signInPage: oidc
+    secret: '${SESSION_SECRET}'
 catalog:
   import:
     entityFilename: catalog-info.yaml
@@ -34,15 +29,13 @@ catalog:
       target: https://github.com/redhat-developer/rhdh/blob/main/catalog-entities/all.yaml
     - type: url
       target: https://github.com/redhat-developer/red-hat-developer-hub-software-templates/blob/main/templates.yaml
-  providers:
-    keycloakOrg:
-      default:
-        baseUrl: "${KEYCLOAK_BASE_URL}"
-        loginRealm: "${KEYCLOAK_LOGIN_REALM}"
-        realm: "${KEYCLOAK_REALM}"
-        clientId: "${KEYCLOAK_CLIENT_ID}"
-        clientSecret: "${KEYCLOAK_CLIENT_SECRET}"
-        schedule:
-          frequency: { minutes: 20 }
-          initialDelay: { seconds: 15 }
-          timeout: { minutes: 5 }
+    - type: file
+      target: ./catalog-entities/users.yaml
+    - type: file
+      target: ./catalog-entities/components.yaml
+    - type: file
+      target: ./catalog-entities/operators.yaml
+    - type: file
+      target: ./catalog-entities/resources.yaml
+    - type: file
+      target: ./catalog-entities/plugins.yaml

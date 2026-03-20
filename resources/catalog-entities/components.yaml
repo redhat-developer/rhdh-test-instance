@@ -1,0 +1,178 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: components-config-map
+  labels:
+    backstage.io/kubernetes-id: developer-hub
+data:
+  components.yaml: |
+    apiVersion: backstage.io/v1alpha1
+    kind: Component
+    metadata:
+      name: developer-hub
+      description: List of resources deployed to openshift to be viewed through the kubernetes and topology plugins
+      annotations:
+        backstage.io/kubernetes-id: developer-hub
+        tekton.dev/cicd: "true"
+    spec:
+      type: service
+      system: integrations
+      lifecycle: qa
+      owner: fantastic-four
+    ---
+    # Demo Component 1: RHDH itself — scanned by the initial Lighthouse audit job.
+    # The lighthouse.io/website-url annotation tells the plugin which URL's audit
+    # history to display on the Overview page.
+    apiVersion: backstage.io/v1alpha1
+    kind: Component
+    metadata:
+      name: demo-lighthouse-rhdh
+      title: Demo Lighthouse — RHDH
+      description: >
+        Demo component showcasing the Lighthouse plugin using RHDH itself as the
+        audited website. The Lighthouse audit card on the Overview page shows the
+        latest performance, accessibility, best-practices, and SEO scores returned
+        by the self-hosted lighthouse-audit-service.
+      annotations:
+        # Required: the URL that was submitted to the lighthouse-audit-service.
+        # Must match the URL used in the initial scan job.
+        # See: https://github.com/backstage/community-plugins/tree/main/workspaces/lighthouse/plugins/lighthouse
+        lighthouse.io/website-url: ${RHDH_BASE_URL}
+
+        backstage.io/kubernetes-id: lighthouse-demo
+      tags:
+        - demo
+        - lighthouse
+        - performance
+        - accessibility
+      links:
+        - url: https://developer.chrome.com/docs/lighthouse/overview/
+          title: Lighthouse Documentation
+          icon: docs
+    spec:
+      type: website
+      lifecycle: experimental
+      owner: group:default/guardians-of-the-galaxy
+      dependencyOf:
+        - resource:default/lighthouse-instance
+    ---
+    # Demo Component 2: backstage.io — a publicly accessible website used to
+    # demonstrate that any external URL can be audited, not just the RHDH instance.
+    apiVersion: backstage.io/v1alpha1
+    kind: Component
+    metadata:
+      name: demo-lighthouse-website
+      title: Demo Lighthouse — Backstage.io
+      description: >
+        Demo component owned by the X-Men team that demonstrates auditing an
+        external public website with the Lighthouse plugin. Owned by a different
+        team than demo-lighthouse-rhdh to enable RBAC testing.
+      annotations:
+        lighthouse.io/website-url: https://janus-idp.io
+
+        backstage.io/kubernetes-id: lighthouse-demo
+      tags:
+        - demo
+        - lighthouse
+        - performance
+      links:
+        - url: https://developer.chrome.com/docs/lighthouse/overview/
+          title: Lighthouse Documentation
+          icon: docs
+    spec:
+      type: website
+      lifecycle: experimental
+      owner: group:default/x-men
+      dependencyOf:
+        - resource:default/lighthouse-instance
+    ---
+    # Demo Component 3: A third website component owned by a different team to demonstrate
+    # multi-team RBAC scenarios. No lighthouse.io/website-url annotation — shows that
+    # catalog components can exist alongside Lighthouse-annotated ones without triggering scans.
+    apiVersion: backstage.io/v1alpha1
+    kind: Component
+    metadata:
+      name: demo-lighthouse-docs
+      title: Demo Lighthouse — Docs Site
+      description: >
+        Demo component owned by the Avengers team. Provides a third ownership context for
+        multi-team RBAC testing alongside demo-lighthouse-rhdh and demo-lighthouse-website.
+        No Lighthouse annotation — demonstrates that the audit card only appears on components
+        that explicitly opt in via the lighthouse.io/website-url annotation.
+      annotations:
+        backstage.io/kubernetes-id: lighthouse-demo
+      tags:
+        - demo
+        - lighthouse
+        - catalog
+      links:
+        - url: https://developer.chrome.com/docs/lighthouse/overview/
+          title: Lighthouse Documentation
+          icon: docs
+    spec:
+      type: website
+      lifecycle: experimental
+      owner: group:default/avengers
+      dependencyOf:
+        - resource:default/lighthouse-instance
+    ---
+    # Plugin Component: Lighthouse RHDH plugin.
+    # Required so that the lighthouse-instance Resource's dependencyOf relation resolves.
+    apiVersion: backstage.io/v1alpha1
+    kind: Component
+    metadata:
+      name: backstage-community-plugin-lighthouse
+      title: Lighthouse Plugin
+      description: >
+        Backstage community Lighthouse plugin deployed in RHDH. Provides web performance
+        and accessibility audit views on component entity pages and a dedicated /lighthouse
+        catalog page, powered by the self-hosted lighthouse-audit-service running in the cluster.
+      annotations:
+        backstage.io/kubernetes-id: developer-hub
+      tags:
+        - plugin
+        - lighthouse
+        - performance
+        - accessibility
+      links:
+        - url: https://github.com/backstage/community-plugins/tree/main/workspaces/lighthouse
+          title: Plugin Repository
+          icon: github
+    spec:
+      type: plugin
+      lifecycle: experimental
+      system: integrations
+      owner: group:default/cluster-admins
+      dependsOn:
+        - resource:default/lighthouse-instance
+    ---
+    # Plugin Component: Keycloak catalog backend module.
+    # Required so that the keycloak and rhsso-operator Resources' dependencyOf relations resolve.
+    apiVersion: backstage.io/v1alpha1
+    kind: Component
+    metadata:
+      name: backstage-community-keycloak
+      title: Keycloak Catalog Module
+      description: >
+        Backstage community Keycloak catalog backend module deployed in RHDH. Ingests users and
+        groups from the Keycloak rhdh realm into the Backstage catalog, powering catalog ownership
+        and RBAC policies. Also configures the OIDC sign-in provider so users authenticate via
+        Keycloak.
+      annotations:
+        backstage.io/kubernetes-id: developer-hub
+      tags:
+        - plugin
+        - keycloak
+        - identity
+        - catalog
+      links:
+        - url: https://github.com/backstage/community-plugins/tree/main/workspaces/keycloak
+          title: Plugin Repository
+          icon: github
+    spec:
+      type: plugin
+      lifecycle: production
+      system: integrations
+      owner: group:default/cluster-admins
+      dependsOn:
+        - resource:default/keycloak

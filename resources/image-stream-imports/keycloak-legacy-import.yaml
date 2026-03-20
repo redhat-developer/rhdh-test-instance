@@ -1,0 +1,22 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStreamImport
+metadata:
+  name: internal-keycloak-legacy
+spec:
+  import: true
+  images:
+    - from:
+        kind: DockerImage
+        name: bitnamilegacy/keycloak:26.3.3-debian-12-r0
+      to:
+        name: latest
+      importPolicy:
+        insecure: false # Set to true if using an insecure registry
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: internal-keycloak-legacy
+spec:
+  lookupPolicy:
+    local: true # Ensure the image is resolved locally

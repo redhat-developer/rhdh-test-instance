@@ -1,0 +1,278 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: operators-config-map
+  labels:
+    backstage.io/kubernetes-id: developer-hub
+data:
+  operators.yaml: |
+    # RHSSO and Keycloak
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: rhsso-operator
+      title: Red Hat Single Sign-On Operator
+      description: Operator that is used to configure Red Hat Single Sign-On through the use of Keycloak for an OpenShift instance
+      annotations:
+        backstage.io/kubernetes-id: rhsso-operator
+        backstage.io/kubernetes-namespace: rhdh
+    spec:
+      type: operator
+      owner: cluster-admins
+      dependencyOf: component:default/backstage-community-keycloak
+      dependsOn: 
+        - resource:default/test-cluster
+    ---
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: keycloak
+      title: Keycloak
+      description: Red Hat Single Sign-On Operator deployment of Keycloak
+      annotations:
+        backstage.io/kubernetes-id: keycloak
+        backstage.io/kubernetes-namespace: rhdh
+      links:
+        - url: https://www.keycloak.org/documentation
+          title: Documentation
+          icon: web
+    spec:
+      type: identity-provider
+      lifecycle: production
+      owner: cluster-admins
+      dependencyOf: component:default/backstage-community-keycloak
+      dependsOn: 
+        - resource:default/rhsso-operator
+    ---
+    # ACM, Multiclusterhub, search
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: acm-operator
+      title: Advanced Cluster Manager for Kubernetes Operator
+      description: Operator that is used to configure the Advanced Cluster Manager for an OpenShift instance
+      annotations:
+        backstage.io/kubernetes-id: acm-operator
+        backstage.io/kubernetes-namespace: rhdh
+    spec:
+      type: operator
+      owner: cluster-admins
+      dependencyOf: component:default/backstage-community-ocm
+      dependsOn: 
+        - resource:default/test-cluster
+    ---
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: search-operator
+      title: Search Operator
+      description: Operator that is used in conjuction with the Advanced Cluster Manager for an OpenShift instance
+      annotations:
+        backstage.io/kubernetes-id: search-operator
+        backstage.io/kubernetes-namespace: rhdh
+    spec:
+      type: operator
+      owner: cluster-admins
+      dependencyOf: component:default/backstage-community-ocm
+      dependsOn: 
+        - resource:default/test-cluster
+    ---
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: multiclusterhub
+      title: MultiClusterHub
+      description: Advanced Cluster Manager deployment of the MultiClusterHub
+      annotations:
+        backstage.io/kubernetes-id: multiclusterhub
+        backstage.io/kubernetes-namespace: rhdh
+    spec:
+      type: operator
+      owner: cluster-admins
+      dependencyOf: component:default/backstage-community-ocm
+      dependsOn: 
+        - resource:default/acm-operator
+    ---
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: pipelines-operator
+      title: Red Hat OpenShift Pipelines Operator
+      description: Operator that is used to configure Red Hat OpenShift Pipelines for an OpenShift instance
+      annotations:
+        backstage.io/kubernetes-id: pipelines-operator
+        backstage.io/kubernetes-namespace: openshift-operators
+    spec:
+      type: operator
+      owner: cluster-admins
+      dependencyOf: component:default/backstage-plugin-tekton-workspace
+      dependsOn: 
+        - resource:default/test-cluster
+    ---
+    # Nexus Repository Manager Operator
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: nxrm-operator
+      title: Nexus Repository Manager Operator
+      description: Operator that is used to deploy and manage Sonatype Nexus Repository Manager instances
+      annotations:
+        backstage.io/kubernetes-id: nxrm-operator
+        backstage.io/kubernetes-namespace: rhdh
+    spec:
+      type: operator
+      owner: cluster-admins
+      dependencyOf: component:default/janus-idp-nexus-repository-manager
+      dependsOn: 
+        - resource:default/test-cluster
+    ---
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: nexus-repo
+      title: Nexus Repository Manager
+      description: Nexus Repository Manager instance for artifact management
+      annotations:
+        backstage.io/kubernetes-id: nexus-repo
+        backstage.io/kubernetes-namespace: rhdh
+      links:
+        - url: https://help.sonatype.com/repomanager3
+          title: Documentation
+          icon: web
+    spec:
+      type: artifact-repository
+      lifecycle: production
+      owner: cluster-admins
+      dependencyOf: component:default/janus-idp-nexus-repository-manager
+      dependsOn: 
+        - resource:default/nxrm-operator
+    ---
+    # SonarQube Community Edition (no operator — plain Deployment)
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: sonarqube-instance
+      title: SonarQube Community Edition
+      description: SonarQube CE instance for code quality and security analysis
+      annotations:
+        backstage.io/kubernetes-id: sonarqube-instance
+        backstage.io/kubernetes-namespace: rhdh
+      links:
+        - url: https://docs.sonarsource.com/sonarqube/latest/
+          title: Documentation
+          icon: web
+    spec:
+      type: code-quality-platform
+      lifecycle: production
+      owner: cluster-admins
+      dependencyOf:
+        - component:default/backstage-community-plugin-sonarqube
+      dependsOn:
+        - resource:default/test-cluster
+    ---
+    # ArgoCD Operator
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: argocd-operator
+      title: ArgoCD Operator
+      description: Operator that is used to deploy and manage ArgoCD instances for GitOps continuous delivery
+      annotations:
+        backstage.io/kubernetes-id: argocd-operator
+        backstage.io/kubernetes-namespace: rhdh
+    spec:
+      type: operator
+      owner: cluster-admins
+      dependencyOf: component:default/roadiehq-argocd
+      dependsOn: 
+        - resource:default/test-cluster
+    ---
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: argocd-instance
+      title: ArgoCD
+      description: ArgoCD instance for GitOps continuous delivery workflows
+      annotations:
+        backstage.io/kubernetes-id: argocd-instance
+        backstage.io/kubernetes-namespace: rhdh
+      links:
+        - url: https://argo-cd.readthedocs.io/
+          title: Documentation
+          icon: web
+    spec:
+      type: gitops-platform
+      lifecycle: production
+      owner: cluster-admins
+      dependencyOf: component:default/roadiehq-argocd
+      dependsOn:
+        - resource:default/argocd-operator
+    ---
+    # Jenkins LTS (plain Deployment — no operator)
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: jenkins-instance
+      title: Jenkins LTS
+      description: Jenkins LTS CI/CD server for build history and pipeline integration with RHDH
+      annotations:
+        backstage.io/kubernetes-id: jenkins-instance
+        backstage.io/kubernetes-namespace: rhdh
+      links:
+        - url: https://www.jenkins.io/doc/
+          title: Documentation
+          icon: web
+    spec:
+      type: ci-platform
+      lifecycle: production
+      owner: cluster-admins
+      dependencyOf:
+        - component:default/backstage-community-plugin-jenkins
+      dependsOn:
+        - resource:default/test-cluster
+    ---
+    # JFrog Artifactory OSS Helm Chart
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: jfrog-artifactory-instance
+      title: JFrog Artifactory OSS
+      description: JFrog Artifactory OSS artifact repository for container image registry integration with RHDH
+      annotations:
+        backstage.io/kubernetes-id: jfrog-artifactory-instance
+        backstage.io/kubernetes-namespace: rhdh
+      links:
+        - url: https://jfrog.com/help/r/jfrog-artifactory-documentation
+          title: Documentation
+          icon: web
+    spec:
+      type: artifact-registry
+      lifecycle: production
+      owner: cluster-admins
+      dependencyOf:
+        - component:default/backstage-community-plugin-jfrog-artifactory
+      dependsOn:
+        - resource:default/test-cluster
+    ---
+    # Lighthouse Audit Service (plain Deployment — no operator)
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: lighthouse-instance
+      title: Lighthouse Audit Service
+      description: Self-hosted lighthouse-audit-service providing web performance and accessibility audit history for RHDH
+      annotations:
+        backstage.io/kubernetes-id: lighthouse-instance
+        backstage.io/kubernetes-namespace: rhdh
+      links:
+        - url: https://github.com/backstage/lighthouse-audit-service
+          title: Documentation
+          icon: web
+    spec:
+      type: audit-service
+      lifecycle: production
+      owner: cluster-admins
+      dependencyOf:
+        - component:default/backstage-community-plugin-lighthouse
+      dependsOn:
+        - resource:default/test-cluster
