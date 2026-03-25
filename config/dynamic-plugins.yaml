@@ -1,6 +1,5 @@
 includes:
   - dynamic-plugins.default.yaml
 plugins:
-  - package: ./dynamic-plugins/dist/backstage-community-plugin-catalog-backend-module-keycloak-dynamic
+  - package: ghcr.io/redhat-developer/rhdh-plugin-export-overlays/microcks-microcks-backstage-provider:pr_2051__0.0.7-SNAPSHOT
     disabled: false
-  
