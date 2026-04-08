@@ -73,8 +73,8 @@ extraEnvVars:
     value: "false"
   - name: KC_HTTP_ENABLED
     value: "true"
-  - name: KC_PROXY_HEADERS
-    value: "xforwarded"
+  - name: KC_PROXY
+    value: "edge"
   - name: JAVA_OPTS_APPEND
     value: "-Djava.net.preferIPv4Stack=true -Xms256m -Xmx512m"
 
