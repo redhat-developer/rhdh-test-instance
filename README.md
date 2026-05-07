@@ -343,3 +343,4 @@ These secrets are available as environment variables with the same name and can 
 
 For local development, you can add secrets in a `.env` file and use them in your app-config or dynamic plugins configuration.
 
+# Test cluster for rhdh-operator PR #2785 review
