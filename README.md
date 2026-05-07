@@ -423,3 +423,4 @@ These secrets are available as environment variables with the same name and can 
 ### Local Deployments (.env Configuration)
 
 For local development, you can add secrets in a `.env` file and use them in your app-config or dynamic plugins configuration.
+
