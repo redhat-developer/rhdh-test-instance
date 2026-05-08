@@ -54,28 +54,19 @@ else
 fi
 echo "Using catalog index tag: ${CATALOG_INDEX_TAG}"
 
-# Detect protocol based on cluster route TLS configuration
-if oc get route console -n openshift-console -o=jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
-    RHDH_PROTOCOL="https"
-else
-    RHDH_PROTOCOL="http"
-fi
-export RHDH_BASE_URL="${RHDH_PROTOCOL}://backstage-developer-hub-${namespace}.${CLUSTER_ROUTER_BASE}"
-
-# Apply secrets
-envsubst < config/rhdh-secrets.yaml | oc apply -f - --namespace="$namespace"
-
-# Create dynamic-plugins ConfigMap
+# The dynamic-plugins ConfigMap was seeded in deploy.sh from the base config
+# and may have been augmented by plugin setup scripts. Append orchestrator
+# plugin entries here if requested, then apply the Backstage CR.
 if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
-    echo "Merging orchestrator plugins into dynamic-plugins configuration..."
-    ORCH_PLUGINS=$(cat config/orchestrator-dynamic-plugins.yaml | grep -A 100 '^plugins:' | tail -n +2)
+    echo "Merging orchestrator plugins into dynamic-plugins ConfigMap..."
+    ORCH_PLUGINS=$(grep -A 100 '^plugins:' config/orchestrator-dynamic-plugins.yaml | tail -n +2)
     oc create configmap dynamic-plugins \
-        --from-file=dynamic-plugins.yaml=<(cat config/dynamic-plugins.yaml; echo ""; echo "$ORCH_PLUGINS") \
-        --namespace="$namespace" \
-        --dry-run=client -o yaml | oc apply -f -
-else
-    oc create configmap dynamic-plugins \
-        --from-file="config/dynamic-plugins.yaml" \
+        --from-file=dynamic-plugins.yaml=<(
+            oc get configmap dynamic-plugins \
+                --namespace="$namespace" \
+                -o jsonpath='{.data.dynamic-plugins\.yaml}'
+            echo "$ORCH_PLUGINS"
+        ) \
         --namespace="$namespace" \
         --dry-run=client -o yaml | oc apply -f -
 fi

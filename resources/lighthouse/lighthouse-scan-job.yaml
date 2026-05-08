@@ -1,0 +1,64 @@
+# Runs a Lighthouse audit against <RHDH_URL> via the in-cluster audit service.
+# The config script patches <RHDH_URL> and <LIGHTHOUSE_SVC> before applying.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lighthouse-initial-scan
+spec:
+  # Clean up completed pods after 5 minutes
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: lighthouse-scan
+        backstage.io/kubernetes-id: lighthouse-instance
+        app.kubernetes.io/part-of: lighthouse-instance
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: scan
+          image: internal-alpine:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+
+              LIGHTHOUSE_SVC="<LIGHTHOUSE_SVC>"
+              RHDH_URL="<RHDH_URL>"
+              RHDH_READY_TIMEOUT=360   # 6 minutes — RHDH deploys after this job is submitted
+              RHDH_READY_INTERVAL=15
+
+              echo "Waiting for Lighthouse audit service at ${LIGHTHOUSE_SVC}..."
+              until wget -qO- "${LIGHTHOUSE_SVC}/v1/websites" >/dev/null 2>&1; do
+                echo "  not ready yet, retrying in 10s..."
+                sleep 10
+              done
+
+              echo "Waiting for RHDH to be reachable at ${RHDH_URL}..."
+              elapsed=0
+              until wget -q --no-check-certificate --spider "${RHDH_URL}/healthcheck" >/dev/null 2>&1; do
+                if [ "$elapsed" -ge "$RHDH_READY_TIMEOUT" ]; then
+                  echo "Warning: Timed out waiting for RHDH — submitting scan anyway."
+                  break
+                fi
+                echo "  RHDH not reachable yet, retrying in ${RHDH_READY_INTERVAL}s... (${elapsed}s elapsed)"
+                sleep "$RHDH_READY_INTERVAL"
+                elapsed=$((elapsed + RHDH_READY_INTERVAL))
+              done
+
+              echo "Submitting Lighthouse audit for: ${RHDH_URL}"
+              wget -qO- \
+                --header="Content-Type: application/json" \
+                --post-data="{\"url\":\"${RHDH_URL}\",\"options\":{\"lighthouseConfig\":{\"settings\":{\"emulatedFormFactor\":\"desktop\",\"chromeFlags\":\"--ignore-certificate-errors\"}}}}" \
+                "${LIGHTHOUSE_SVC}/v1/audits" \
+                && echo "Audit submitted successfully!" \
+                || { echo "Warning: Audit submission failed — service may not yet accept scans."; exit 0; }

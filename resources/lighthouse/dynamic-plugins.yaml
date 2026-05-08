@@ -1,0 +1,57 @@
+- package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-lighthouse:bs_1.45.3__0.16.0!backstage-community-plugin-lighthouse
+  disabled: false
+  pluginConfig:
+    dynamicPlugins:
+      frontend:
+        backstage-community.plugin-lighthouse:
+          appIcons:
+            - name: lighthouse
+              importName: LighthouseIcon
+          dynamicRoutes:
+            - path: /lighthouse
+              importName: LighthousePage
+              menuItem:
+                icon: lighthouse
+                text: menuItem.lighthouse
+                textKey: menuItem.lighthouse
+          mountPoints:
+            - mountPoint: entity.page.overview/cards
+              importName: EntityLastLighthouseAuditCard
+              config:
+                layout:
+                  gridColumnEnd:
+                    md: span 6
+                    xs: span 12
+                if:
+                  allOf:
+                    - isLighthouseAvailable
+- package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-lighthouse-backend:bs_1.45.3__0.17.0!backstage-community-plugin-lighthouse-backend
+  disabled: false
+  pluginConfig:
+    backend:
+      csp:
+        # Lighthouse HTML reports contain inline <script> blocks. Since the report
+        # is served through RHDH's proxy (same origin), RHDH's script-src applies
+        # to the iframe content. 'unsafe-inline' is required to render the report.
+        # All existing RHDH defaults are preserved here to avoid breaking them.
+        script-src:
+          - "'self'"
+          - "'unsafe-eval'"
+          - "'unsafe-inline'"
+    proxy:
+      endpoints:
+        /lighthouse:
+          target: '${LIGHTHOUSE_SVC_URL}'
+          changeOrigin: true
+          # Lighthouse's LighthouseRestApi uses plain fetch() with no Backstage
+          # identity token. 'dangerously-allow-unauthenticated' is required since
+          # the proxy defaults to credentials: require since Backstage 1.26.
+          credentials: dangerously-allow-unauthenticated
+
+    lighthouse:
+      baseUrl: ${LIGHTHOUSE_URL}
+      schedule:
+        frequency:
+          hours: 12
+        timeout:
+          minutes: 30

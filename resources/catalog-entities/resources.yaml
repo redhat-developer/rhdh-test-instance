@@ -1,0 +1,22 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: resources-config-map
+  labels:
+    backstage.io/kubernetes-id: developer-hub
+data:
+  resources.yaml: |
+    apiVersion: backstage.io/v1alpha1
+    kind: Resource
+    metadata:
+      name: minio
+      title: Minio
+      description: Open-source object storage server
+      annotations:
+        backstage.io/kubernetes-id: minio
+    spec:
+      type: object-storage
+      system: integrations
+      lifecycle: production
+      owner: avengers
+    ---

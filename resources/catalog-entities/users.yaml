@@ -1,0 +1,17 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: users-config-map
+  labels:
+    backstage.io/kubernetes-id: developer-hub
+data:
+  users.yaml: |
+    apiVersion: backstage.io/v1alpha1
+    kind: User
+    metadata:
+      name: guest
+      description: Default guest user for unauthenticated access
+    spec:
+      profile:
+        displayName: Guest User
+      memberOf: []

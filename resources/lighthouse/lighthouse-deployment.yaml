@@ -1,0 +1,186 @@
+# PostgreSQL database for lighthouse-audit-service
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lighthouse-postgres-data
+  labels:
+    app: lighthouse-postgres
+    backstage.io/kubernetes-id: lighthouse-instance
+    app.kubernetes.io/part-of: lighthouse-instance
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lighthouse-postgres
+  labels:
+    app: lighthouse-postgres
+    backstage.io/kubernetes-id: lighthouse-instance
+    app.kubernetes.io/part-of: lighthouse-instance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lighthouse-postgres
+  template:
+    metadata:
+      labels:
+        app: lighthouse-postgres
+        backstage.io/kubernetes-id: lighthouse-instance
+    spec:
+      containers:
+        - name: postgres
+          image: internal-postgres:13
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: lighthouse
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lighthouse-credentials
+                  key: password
+            - name: POSTGRES_DB
+              value: lighthouse
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, lighthouse]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: lighthouse-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lighthouse-postgres
+  labels:
+    app: lighthouse-postgres
+    backstage.io/kubernetes-id: lighthouse-instance
+    app.kubernetes.io/part-of: lighthouse-instance
+spec:
+  selector:
+    app: lighthouse-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+# Lighthouse audit service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lighthouse
+  labels:
+    app: lighthouse
+    backstage.io/kubernetes-id: lighthouse-instance
+    app.kubernetes.io/part-of: lighthouse-instance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lighthouse
+  template:
+    metadata:
+      labels:
+        app: lighthouse
+        backstage.io/kubernetes-id: lighthouse-instance
+        app.kubernetes.io/part-of: lighthouse-instance
+    spec:
+      containers:
+        - name: lighthouse
+          image: internal-lighthouse-audit-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3003
+          env:
+            - name: LAS_PORT
+              value: '3003'
+            - name: LAS_CORS
+              value: 'true'
+            - name: PGHOST
+              value: lighthouse-postgres
+            - name: PGPORT
+              value: '5432'
+            - name: PGUSER
+              value: lighthouse
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lighthouse-credentials
+                  key: password
+            - name: PGDATABASE
+              value: lighthouse
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /v1/websites
+              port: 3003
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /v1/websites
+              port: 3003
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lighthouse
+  labels:
+    app: lighthouse
+    backstage.io/kubernetes-id: lighthouse-instance
+    app.kubernetes.io/part-of: lighthouse-instance
+spec:
+  selector:
+    app: lighthouse
+  ports:
+    - port: 3003
+      targetPort: 3003
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: lighthouse
+  labels:
+    app: lighthouse
+    backstage.io/kubernetes-id: lighthouse-instance
+    app.kubernetes.io/part-of: lighthouse-instance
+spec:
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  to:
+    kind: Service
+    name: lighthouse
+  port:
+    targetPort: 3003

@@ -1,0 +1,32 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: rbac-policy
+  labels:
+    backstage.io/kubernetes-id: developer-hub
+data:
+  rbac-policy.csv: |
+    p, role:default/admin, catalog-entity, read, allow
+    p, role:default/admin, catalog.entity.create, create, allow
+
+    g, user:default/guest, role:default/admin
+
+    p, role:default/admin, catalog-entity, read, allow
+    p, role:default/admin, catalog.entity.create, create, allow
+
+    g, user:default/someuser, role:default/developer
+
+    g, user:default/ant-man, role:default/conditional-role
+  conditional-policy.yaml: |
+    result: CONDITIONAL
+    roleEntityRef: 'role:default/conditional-role'
+    pluginId: catalog
+    resourceType: catalog-entity
+    permissionMapping:
+      - read
+    conditions:
+      rule: IS_ENTITY_OWNER
+      resourceType: catalog-entity
+      params:
+        claims:
+          - $ownerRefs
