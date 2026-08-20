@@ -6,10 +6,12 @@ command -v jq >/dev/null 2>&1 || { echo "Error: jq is required but not installed
 command -v oc >/dev/null 2>&1 || { echo "Error: oc (OpenShift CLI) is required but not installed"; exit 1; }
 
 NAMESPACE=${1:-rhdh-keycloak}
-USERS_FILE=${2:-utils/keycloak/users.json}
-GROUPS_FILE=${3:-utils/keycloak/groups.json}
-CLIENT_FILE="utils/keycloak/rhdh-client.json"
+KEYCLOAK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+USERS_FILE=${2:-"${KEYCLOAK_DIR}/users.json"}
+GROUPS_FILE=${3:-"${KEYCLOAK_DIR}/groups.json"}
+CLIENT_FILE="${KEYCLOAK_DIR}/rhdh-client.json"
 KEYCLOAK_RELEASE_NAME="keycloak"
+KEYCLOAK_VALUES="${KEYCLOAK_DIR}/keycloak-values.yaml"
 
 # Helper function for API calls with error checking
 api_call() {
@@ -65,7 +67,7 @@ helm repo update
 echo "Deploying Keycloak..."
 helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
   --namespace $NAMESPACE \
-  --values utils/keycloak/keycloak-values.yaml
+  --values "$KEYCLOAK_VALUES"
 
 echo "Waiting for Keycloak rollout..."
 oc rollout status statefulset/keycloak -n $NAMESPACE --timeout=5m
@@ -80,7 +82,7 @@ fi
 # Create OpenShift Route
 echo "Creating OpenShift Route (protocol: $KEYCLOAK_PROTOCOL)..."
 if [ "$KEYCLOAK_PROTOCOL" = "https" ]; then
-cat <<EOF | kubectl apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -102,7 +104,7 @@ spec:
   wildcardPolicy: None
 EOF
 else
-cat <<EOF | kubectl apply -f -
+cat <<EOF | oc apply -f -
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
@@ -238,3 +240,28 @@ export KEYCLOAK_REALM="rhdh"
 export KEYCLOAK_LOGIN_REALM="rhdh"
 export KEYCLOAK_METADATA_URL="$KEYCLOAK_URL/realms/rhdh"
 export KEYCLOAK_BASE_URL="$KEYCLOAK_URL"
+export KEYCLOAK_PROTOCOL
+
+update_rhdh_client_redirects() {
+  local rhdh_url="${1:-}"
+  local redirect client_uuid payload token_response
+  [[ -n "$rhdh_url" ]] || { echo "Error: RHDH URL required to pin Keycloak redirects"; return 1; }
+  redirect="${rhdh_url%/}/api/auth/oidc/handler/frame"
+
+  token_response=$(curl -sk -w "\n%{http_code}" -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+    -d "username=admin&password=admin123&grant_type=password&client_id=admin-cli")
+  TOKEN_HTTP_CODE=$(echo "$token_response" | tail -1)
+  TOKEN_BODY=$(echo "$token_response" | sed '$d')
+  [ "$TOKEN_HTTP_CODE" -ge 400 ] && echo "Error: Failed to refresh admin token (HTTP $TOKEN_HTTP_CODE): $TOKEN_BODY" && return 1
+  ADMIN_TOKEN=$(echo "$TOKEN_BODY" | jq -r '.access_token // empty')
+  [ -z "$ADMIN_TOKEN" ] && echo "Error: Failed to parse refreshed admin token" && return 1
+
+  client_uuid=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients?clientId=rhdh-client" "" "Get rhdh-client" | \
+    jq -r '.[0].id // empty')
+  [ -z "$client_uuid" ] && echo "Error: rhdh-client UUID not found" && return 1
+
+  payload=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$client_uuid" "" "Get rhdh-client representation" | \
+    jq -c --arg uri "$redirect" '.redirectUris = [$uri] | .webOrigins = [$uri] | .implicitFlowEnabled = false')
+  api_call PUT "$KEYCLOAK_URL/admin/realms/rhdh/clients/$client_uuid" "$payload" "Pin rhdh-client redirects" >/dev/null
+  echo "Pinned rhdh-client redirectUris/webOrigins to ${redirect}"
+}

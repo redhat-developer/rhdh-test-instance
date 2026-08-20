@@ -188,7 +188,7 @@ Pin an OSL pre-release against a chosen RHDH version, deploy, and run the defaul
 3. `Rerun Failswitch from failure point`
 4. `Execute token-propagation workflow via API`
 
-Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators, the custom catalog, and the mirror namespace as well as the RHDH namespace contents.
+Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators (`logic-operator` / `serverless-operator` only), the custom catalog, and the mirror namespace, and cleans the RHDH namespace contents. It does not delete a leftover `rhdh` namespace unless you pass `--delete-namespace` (`make cleanup-full`). Other operators in `openshift-operators` are left in place.
 
 Before Playwright, a GraphQL probe hits the **raw** Data Index (`sonataflow-platform-data-index-service`), not the `osl-di-rewrite` proxy. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137). The Orchestrator plugin then cannot `POST` to execute/abort/retrigger. The probe exits 2 on that unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`, which prints a warning and continues so the four tests can still run behind the rewrite proxy. Drop that override after the plugin derives `serviceUrl` from `endpoint`.
 

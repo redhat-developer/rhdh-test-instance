@@ -28,6 +28,8 @@ SMOKE_GREP='Run Greeting workflow and verify Workflows tab|Run Failswitch workfl
 WORKFLOW_REPO="${SERVERLESS_WORKFLOWS_REPO:-https://github.com/rhdhorchestrator/serverless-workflows.git}"
 WORKFLOW_REPO_REF="${SERVERLESS_WORKFLOWS_REF:-daeeee8dec16beab6d96a81774ef500081a2c2b0}"
 DEMO_WORKFLOW_REPO="${ORCHESTRATOR_DEMO_REPO:-https://github.com/rhdhorchestrator/orchestrator-demo.git}"
+DEMO_WORKFLOW_REF="${ORCHESTRATOR_DEMO_REF:-c6e59bab65bd584ede5fde7610bbc6187e70206c}"
+SAMPLE_SERVER_IMAGE="${SAMPLE_SERVER_IMAGE:-quay.io/orchestrator/sample-server@sha256:67e694c65bdff0b256590ac32aaad1eeb2045ffbe6923b140d4e022acf8c8993}"
 
 run_all=false
 run_cleanup=false
@@ -235,7 +237,7 @@ patch_smoke_workflow() {
         greeting)   image="quay.io/orchestrator/serverless-workflow-greeting:osl_${tag}" ;;
         failswitch) image="quay.io/orchestrator/fail-switch:osl_${tag}" ;;
         token-propagation)
-            oc -n "$ns" patch sonataflow "$name" --type merge -p "$persistence" >/dev/null || true
+            oc -n "$ns" patch sonataflow "$name" --type merge -p "$persistence" >/dev/null
             return 0
             ;;
         *) die "unknown smoke workflow: $name" ;;
@@ -265,7 +267,7 @@ patch_smoke_workflow() {
           }
         }
       }
-    }" >/dev/null || true
+    }" >/dev/null
 }
 
 wait_smoke_workflows_ready() {
@@ -301,6 +303,8 @@ ensure_token_propagation_workflow() {
     _osl_token_demo_cleanup() { rm -rf "$demo_dir"; trap - RETURN; }
     trap _osl_token_demo_cleanup RETURN
     git clone --depth 1 "$DEMO_WORKFLOW_REPO" "$demo_dir" >/dev/null
+    git -C "$demo_dir" fetch --depth 1 origin "$DEMO_WORKFLOW_REF" >/dev/null
+    git -C "$demo_dir" checkout --detach "$DEMO_WORKFLOW_REF" >/dev/null
     manifests_dir="${demo_dir}/09_token_propagation/manifests"
     props_cm="${manifests_dir}/01-configmap_token-propagation-props.yaml"
     specs_cm="${manifests_dir}/03-configmap_02-token-propagation-resources-specs.yaml"
@@ -341,7 +345,7 @@ spec:
     spec:
       containers:
         - name: sample-server
-          image: quay.io/orchestrator/sample-server:latest
+          image: ${SAMPLE_SERVER_IMAGE}
           ports:
             - containerPort: 8080
           livenessProbe:
@@ -438,6 +442,7 @@ write_overlays_dotenv() {
 K8S_CLUSTER_ROUTER_BASE=${K8S_CLUSTER_ROUTER_BASE}
 RHDH_BASE_URL=${RHDH_BASE_URL}
 RHDH_VERSION=${RHDH_VERSION:-}
+NAME_SPACE=${namespace}
 SKIP_KEYCLOAK_DEPLOYMENT=true
 SKIP_OPERATOR_INSTALLATION=true
 GH_USER_ID=test1
@@ -629,6 +634,7 @@ phase_test() {
     export K8S_CLUSTER_ROUTER_BASE RHDH_BASE_URL KEYCLOAK_BASE_URL RHDH_VERSION
     export SKIP_KEYCLOAK_DEPLOYMENT=true
     export SKIP_OPERATOR_INSTALLATION=true
+    export NAME_SPACE="$namespace"
     export GH_USER_ID=test1
     export GH_USER_PASS=test1@123
     export KEYCLOAK_REALM=rhdh

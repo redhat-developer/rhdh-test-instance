@@ -76,6 +76,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+cd "$SCRIPT_DIR"
+
 # ── Validate inputs ──────────────────────────────────────────────────────────
 
 if ! oc whoami &>/dev/null; then
@@ -330,14 +332,20 @@ prepare_keycloak() {
 }
 
 sync_keycloak_runtime_env() {
-    local keycloak_host
+    local keycloak_host keycloak_proto
     keycloak_host="$(oc get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
     if [[ -z "$keycloak_host" ]]; then
         echo "Error: could not resolve Keycloak route in namespace '$KEYCLOAK_NAMESPACE'."
         exit 1
     fi
 
-    export KEYCLOAK_BASE_URL="https://${keycloak_host}"
+    if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
+        keycloak_proto="http"
+        if oc get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
+            keycloak_proto="https"
+        fi
+        export KEYCLOAK_BASE_URL="${keycloak_proto}://${keycloak_host}"
+    fi
     export KEYCLOAK_METADATA_URL="${KEYCLOAK_BASE_URL}/realms/rhdh"
     export KEYCLOAK_REALM="${KEYCLOAK_REALM:-rhdh}"
     export KEYCLOAK_LOGIN_REALM="${KEYCLOAK_LOGIN_REALM:-${KEYCLOAK_REALM}}"
@@ -358,6 +366,11 @@ verify_shared_existing_rhdh_contract() {
 
 log_debug "Entrypoint args: version=${version}, namespace=${namespace}, prepareInternalOsl=${prepare_internal_osl_release:-none}"
 phase_checkpoint "cluster-connectivity-validated"
+if [[ -f "${SCRIPT_DIR}/.env.osl" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/.env.osl"
+    log "Loaded existing .env.osl before baseline (OSL_CATALOG_SOURCE=${OSL_CATALOG_SOURCE:-unset})"
+fi
 assert_empty_baseline "$namespace" "$KEYCLOAK_NAMESPACE"
 
 wait_for_rhdh_auth_and_orchestrator_ready() {
@@ -499,11 +512,20 @@ export SONATAFLOW_DATA_INDEX_URL="http://sonataflow-platform-data-index-service.
 export IS_AUTH_ENABLED="true"
 
 log "Deploying RHDH $version with shared orchestrator support"
-cd "$SCRIPT_DIR"
 SKIP_ENV_SOURCE=1 \
 SKIP_ORCHESTRATOR_INFRA_INSTALL=1 \
 ./deploy.sh helm "$version" --namespace "$namespace" --with-orchestrator
 phase_checkpoint "rhdh-deployed"
+
+rhdh_host="$(oc get route redhat-developer-hub -n "$namespace" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+if [[ -z "$rhdh_host" ]]; then
+    echo "Error: Could not resolve RHDH route after deploy."
+    exit 1
+fi
+export RHDH_BASE_URL="https://${rhdh_host}"
+if declare -F update_rhdh_client_redirects >/dev/null; then
+    update_rhdh_client_redirects "$RHDH_BASE_URL"
+fi
 
 # ── Verify overlays existing-RHDH contract ───────────────────────────────────
 
@@ -523,9 +545,8 @@ run_post_setup_workflow_smoke "$namespace"
 # ── Summary ──────────────────────────────────────────────────────────────────
 
 rhdh_host="$(oc get route redhat-developer-hub -n "$namespace" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-keycloak_host="$(oc get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-RHDH_URL="${rhdh_host:+https://${rhdh_host}}"
-KEYCLOAK_URL="${keycloak_host:+https://${keycloak_host}}"
+RHDH_URL="${RHDH_BASE_URL:-${rhdh_host:+https://${rhdh_host}}}"
+KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-}"
 
 echo ""
 echo "==========================================="
