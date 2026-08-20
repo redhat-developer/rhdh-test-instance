@@ -106,5 +106,20 @@ class TestClassifyCli(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
 
 
+class TestProbeArgv(unittest.TestCase):
+    def test_curl_targets_raw_data_index_not_rewrite(self):
+        argv = osl_smoke.curl_probe_argv("orchestrator")
+        joined = " ".join(argv)
+        self.assertIn("sonataflow-platform-data-index-service.orchestrator.svc.cluster.local/graphql", joined)
+        self.assertNotIn("osl-di-rewrite", joined)
+        self.assertIn("ProcessDefinitions", joined)
+
+    def test_graphql_query_asks_for_service_url_and_endpoint(self):
+        q = osl_smoke.graphql_query()
+        self.assertIn("serviceUrl", q)
+        self.assertIn("endpoint", q)
+        self.assertIn("ProcessDefinitions", q)
+
+
 if __name__ == "__main__":
     unittest.main()
