@@ -1,6 +1,8 @@
 .env
 .env.osl
 config/image-mirrors.conf
+config/osl-releases/*.json
+!config/osl-releases/example.json
 install-rhdh-catalog-source.sh
 plugin-infra.sh
 .DS_Store
