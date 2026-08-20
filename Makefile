@@ -5,6 +5,8 @@ PLUGINS ?=
 USE_CONTAINER ?= false
 CATALOG_INDEX_TAG ?=
 RUNNER_IMAGE ?= quay.io/rhdh-community/rhdh-e2e-runner:main
+OSL_RELEASE ?=
+ORCH_NAMESPACE ?= orchestrator
 
 export CATALOG_INDEX_TAG
 
@@ -67,6 +69,32 @@ undeploy-infra: ## Uninstall orchestrator infra chart
 
 clean: ## Delete the entire namespace (removes everything)
 	oc delete project $(NAMESPACE) --ignore-not-found
+
+# ── Orchestrator / OSL RC smoke ───────────────────────────────────────────────
+
+.PHONY: prepare-osl setup-orchestrator cleanup cleanup-full osl-regression
+
+prepare-osl: ## Mirror pre-release OSL images (OSL_RELEASE=1.39.0.CR1)
+ifndef OSL_RELEASE
+	$(error OSL_RELEASE is required, e.g. make prepare-osl OSL_RELEASE=1.39.0.CR1)
+endif
+	./prepare-osl-internal.sh --release $(OSL_RELEASE)
+
+setup-orchestrator: ## Full RHDH + orchestrator setup (VERSION, ORCH_NAMESPACE, OSL_RELEASE)
+	./setup-orchestrator.sh $(VERSION) --namespace $(ORCH_NAMESPACE) $(if $(filter-out ,$(OSL_RELEASE)),--prepare-internal-osl $(OSL_RELEASE))
+
+cleanup: ## Clean RHDH/orchestrator/OSL resources from ORCH_NAMESPACE
+	./cleanup.sh --namespace $(ORCH_NAMESPACE)
+
+cleanup-full: ## Full cleanup: operators + related namespaces
+	./cleanup.sh --namespace $(ORCH_NAMESPACE) --include-operators --delete-namespace
+
+osl-regression: ## Cleanup + prepare OSL + deploy + 4-test smoke (VERSION, OSL_RELEASE)
+ifndef OSL_RELEASE
+	$(error OSL_RELEASE is required, e.g. make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1)
+endif
+	./run-osl-regression.sh --all --rhdh $(VERSION) --osl-release $(OSL_RELEASE) --namespace $(ORCH_NAMESPACE) \
+		$(if $(filter 1,$(ALLOW_RELATIVE_SERVICE_URL)),--allow-relative-service-url,)
 
 # ── Status ────────────────────────────────────────────────────────────────────
 

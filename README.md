@@ -193,6 +193,8 @@ Smoke always deploys greeting, failswitch, token-propagation, and `sample-server
 ```bash
 # One-shot: cleanup (including operators) -> mirror OSL -> deploy -> smoke
 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator
+# 1.39.CR1 currently needs the DI contract override:
+ALLOW_RELATIVE_SERVICE_URL=1 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator
 
 # Or call the driver directly
 ./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1 --namespace orchestrator
