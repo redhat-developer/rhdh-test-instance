@@ -41,11 +41,20 @@ create_rhdh_secrets() {
   : "${RHDH_BASE_URL:?RHDH_BASE_URL must be set before setup-resources.sh runs}"
 
   if oc get secret rhdh-secrets --namespace="${NAMESPACE}" &>/dev/null; then
-    # Secret already exists — only update RHDH_BASE_URL so the URL stays
-    # current without rotating SESSION_SECRET or clearing plugin-owned keys.
-    oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge \
-      -p "{\"stringData\":{\"RHDH_BASE_URL\":\"${RHDH_BASE_URL}\"}}"
-    echo "rhdh-secrets already exists — updated RHDH_BASE_URL only."
+    # Keep SESSION_SECRET stable; refresh URLs and Keycloak/orchestrator keys.
+    oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge -p "{
+      \"stringData\": {
+        \"RHDH_BASE_URL\": \"${RHDH_BASE_URL}\",
+        \"KEYCLOAK_BASE_URL\": \"${KEYCLOAK_BASE_URL:-}\",
+        \"KEYCLOAK_METADATA_URL\": \"${KEYCLOAK_METADATA_URL:-}\",
+        \"KEYCLOAK_LOGIN_REALM\": \"${KEYCLOAK_LOGIN_REALM:-}\",
+        \"KEYCLOAK_REALM\": \"${KEYCLOAK_REALM:-}\",
+        \"KEYCLOAK_CLIENT_ID\": \"${KEYCLOAK_CLIENT_ID:-}\",
+        \"KEYCLOAK_CLIENT_SECRET\": \"${KEYCLOAK_CLIENT_SECRET:-}\",
+        \"SONATAFLOW_DATA_INDEX_URL\": \"${SONATAFLOW_DATA_INDEX_URL:-}\"
+      }
+    }"
+    echo "rhdh-secrets already exists — updated URL/Keycloak/orchestrator keys."
   else
     # Generate a random session secret at deploy time so it is never hardcoded.
     local session_secret
@@ -62,6 +71,7 @@ create_rhdh_secrets() {
       --from-literal=KEYCLOAK_CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET:-}" \
       --from-literal=LIGHTHOUSE_URL="${LIGHTHOUSE_URL:-}" \
       --from-literal=LIGHTHOUSE_SVC_URL="${LIGHTHOUSE_SVC_URL:-}" \
+      --from-literal=SONATAFLOW_DATA_INDEX_URL="${SONATAFLOW_DATA_INDEX_URL:-}" \
       --namespace="${NAMESPACE}"
 
     echo "rhdh-secrets created!"

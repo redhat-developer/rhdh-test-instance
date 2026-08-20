@@ -10,6 +10,8 @@ data:
     p, role:default/admin, catalog.entity.create, create, allow
 
     g, user:default/guest, role:default/admin
+    g, user:default/test1, role:default/admin
+    g, user:default/test2, role:default/admin
 
     p, role:default/admin, catalog-entity, read, allow
     p, role:default/admin, catalog.entity.create, create, allow

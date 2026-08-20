@@ -1,0 +1,56 @@
+{
+  "_comment": "OSL pre-release manifest. Copy this file to <version>.json and fill in values from the release email.",
+  "version": "1.39.0.CR1",
+  "iib": {
+    "_comment": "Index Image Bundles keyed by OCP minor version. Use the IIB tag from the release email.",
+    "4.17": "registry-proxy.engineering.redhat.com/rh-osbs/iib:123456",
+    "4.18": "registry-proxy.engineering.redhat.com/rh-osbs/iib:123457"
+  },
+  "images": [
+    {
+      "_comment": "Each entry is a container image referenced by the operator bundle. source is the digest ref from the release email, name is a short identifier used as the internal registry repo name.",
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-rhel9-operator@sha256:abcdef...",
+      "name": "logic-rhel9-operator"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-data-index-ephemeral-rhel9@sha256:abcdef...",
+      "name": "logic-data-index-ephemeral-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-data-index-postgresql-rhel9@sha256:abcdef...",
+      "name": "logic-data-index-postgresql-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-jobs-service-ephemeral-rhel9@sha256:abcdef...",
+      "name": "logic-jobs-service-ephemeral-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-jobs-service-postgresql-rhel9@sha256:abcdef...",
+      "name": "logic-jobs-service-postgresql-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-swf-builder-rhel9@sha256:abcdef...",
+      "name": "logic-swf-builder-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-swf-devmode-rhel9@sha256:abcdef...",
+      "name": "logic-swf-devmode-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-management-console-rhel9@sha256:abcdef...",
+      "name": "logic-management-console-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-db-migrator-tool-rhel9@sha256:abcdef...",
+      "name": "logic-db-migrator-tool-rhel9"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-operator-bundle@sha256:abcdef...",
+      "name": "logic-operator-bundle"
+    },
+    {
+      "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-kn-workflow-cli-artifacts-rhel9@sha256:abcdef...",
+      "name": "logic-kn-workflow-cli-artifacts-rhel9"
+    }
+  ]
+}

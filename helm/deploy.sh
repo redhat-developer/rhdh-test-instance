@@ -16,6 +16,11 @@ if [[ "$version" =~ ^([0-9]+(\.[0-9]+)?)$ ]]; then
     CV=$(curl -s "https://quay.io/api/v1/repository/rhdh/chart/tag/?onlyActiveTags=true&limit=600" | jq -r '.tags[].name' | grep "^${version}-" | sort -V | tail -n 1)
 elif [[ "$version" =~ CI$ ]]; then
     CV=$version
+elif [[ "$version" == "next" ]]; then
+    CV=$(curl -s "https://quay.io/api/v1/repository/rhdh/chart/tag/?onlyActiveTags=true&limit=600" | jq -r '.tags[].name' | grep -- '-CI$' | sort -V | tail -n 1)
+    if [[ -z "$CV" ]]; then
+        CV="next"
+    fi
 else
     echo "Error: Invalid helm chart version: $version"
     [[ "$OPENSHIFT_CI" == "true" ]] && gh_comment "❌ **Error: Invalid helm chart version** 🚫\n\n📝 **Provided version:** \`$version\`\n\nPlease check your version and try again! 🔄"
@@ -41,8 +46,37 @@ fi
 
 echo "Using ${CHART_URL} to install Helm chart"
 
+append_to_dynamic_plugins_cm() {
+    local extra="$1"
+    local current
+    current="$(oc get configmap dynamic-plugins --namespace "$namespace" -o jsonpath='{.data.dynamic-plugins\.yaml}' 2>/dev/null || true)"
+    extra="$(printf '%s\n' "$extra" | sed '1{/^plugins:[[:space:]]*$/d;}')"
+    if [[ "$extra" == -* ]]; then
+        extra="$(printf '%s\n' "$extra" | sed 's/^/  /')"
+    fi
+    oc create configmap dynamic-plugins \
+        --from-file=dynamic-plugins.yaml=<(printf '%s\n%s\n' "$current" "$extra") \
+        --namespace "$namespace" --dry-run=client -o yaml \
+        | oc apply -f - --namespace "$namespace" >/dev/null
+}
+
+if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
+    current_dp="$(oc get configmap dynamic-plugins --namespace "$namespace" -o jsonpath='{.data.dynamic-plugins\.yaml}' 2>/dev/null || true)"
+    if [[ "$current_dp" != *plugin-orchestrator* ]]; then
+        orch_file="config/orchestrator-dynamic-plugins.yaml"
+        if [[ "$version" == "next" || "$version" == *-CI ]]; then
+            orch_file="config/orchestrator-dynamic-plugins-next.yaml"
+        fi
+        echo "Merging orchestrator plugins from ${orch_file} into dynamic-plugins ConfigMap..."
+        append_to_dynamic_plugins_cm "$(cat "$orch_file")"
+    fi
+fi
+
 # Install orchestrator infrastructure if requested
 if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
+    if [[ "${SKIP_ORCHESTRATOR_INFRA_INSTALL:-}" == "1" ]]; then
+        echo "Skipping orchestrator infrastructure chart installation (SKIP_ORCHESTRATOR_INFRA_INSTALL=1)."
+    else
     echo "Installing orchestrator infrastructure chart..."
     # Check if operators are already installed on the cluster (cluster-scoped, shared across namespaces)
     if oc get pods -n openshift-serverless --no-headers 2>/dev/null | grep -q . && \
@@ -66,6 +100,7 @@ if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     until [[ "$(oc get pods -n openshift-serverless --no-headers 2>/dev/null | wc -l)" -gt 0 ]]; do sleep 5; done
     until [[ "$(oc get pods -n openshift-serverless-logic --no-headers 2>/dev/null | wc -l)" -gt 0 ]]; do sleep 5; done
     echo "Serverless operator pods are running."
+    fi
 fi
 
 # Build dynamic plugins value file.
@@ -101,12 +136,39 @@ HELM_ARGS=(
 
 if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     HELM_ARGS+=(--set orchestrator.enabled=true)
+    # setup-orchestrator.sh pre-installs Serverless/Logic + SonataFlowPlatform.
+    # Keep orchestrator plugins enabled in RHDH, but prevent chart-managed
+    # operator subscriptions from fighting the prepared OSL catalog.
+    if [[ "${SKIP_ORCHESTRATOR_INFRA_INSTALL:-}" == "1" ]]; then
+        HELM_ARGS+=(
+            --set orchestrator.serverlessLogicOperator.enabled=false
+            --set orchestrator.serverlessOperator.enabled=false
+        )
+    fi
 fi
 
 if [[ "${IS_AUTH_ENABLED:-false}" != "true" ]]; then
     HELM_ARGS+=(
         --set "upstream.backstage.extraAppConfig[1].configMapRef=app-config-guest-auth"
         --set "upstream.backstage.extraAppConfig[1].filename=app-config-guest-auth.yaml"
+    )
+elif [[ -n "${KEYCLOAK_BASE_URL:-}" ]]; then
+    echo "Applying OIDC app-config from Keycloak at ${KEYCLOAK_BASE_URL}"
+    oidc_tmp="$(mktemp)"
+    cp config/app-config-oidc.yaml "$oidc_tmp"
+    for key in KEYCLOAK_METADATA_URL KEYCLOAK_CLIENT_ID KEYCLOAK_CLIENT_SECRET RHDH_BASE_URL SONATAFLOW_DATA_INDEX_URL; do
+        val="${!key:-}"
+        val_esc="$(printf '%s' "$val" | sed -e 's/[&\\#]/\\&/g')"
+        sed -i "s#\${${key}}#${val_esc}#g" "$oidc_tmp"
+    done
+    oc create configmap app-config-oidc \
+        --from-file=app-config-oidc.yaml="$oidc_tmp" \
+        --namespace "$namespace" --dry-run=client -o yaml \
+        | oc apply -f - --namespace "$namespace" >/dev/null
+    rm -f "$oidc_tmp"
+    HELM_ARGS+=(
+        --set "upstream.backstage.extraAppConfig[1].configMapRef=app-config-oidc"
+        --set "upstream.backstage.extraAppConfig[1].filename=app-config-oidc.yaml"
     )
 fi
 

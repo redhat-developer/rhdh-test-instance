@@ -4,7 +4,7 @@ Research for this spec: RHIDP-13375, RHDH 1.10 Orchestrator docs, OSL 1.37–1.3
 
 ## Problem
 
-`./run-osl-regression.sh --test` (without `--full-e2e`) copies `playwright/osl-regression-smoke.spec.ts` into overlays e2e and runs **all 10** `registerOrchestratorCoreWorkflowTests` cases. That is more Playwright than an OSL CR gate needs: abort / status-detail / All Runs / suggested-link duplicate Failswitch OSL APIs and mostly assert RHDH UI. A single Greeting execute is **not** enough either: it misses Jobs Service timers, abort, switch/error, retrigger, and JWT/OpenAPI auth into the workflow runtime.
+`./run-osl-regression.sh --test` used to copy `playwright/osl-regression-smoke.spec.ts` into overlays e2e and run **all 10** `registerOrchestratorCoreWorkflowTests` cases. That is more Playwright than an OSL CR gate needs: abort / status-detail / All Runs / suggested-link duplicate Failswitch OSL APIs and mostly assert RHDH UI. A single Greeting execute is **not** enough either: it misses Jobs Service timers, abort, switch/error, retrigger, and JWT/OpenAPI auth into the workflow runtime.
 
 OSL 1.39.CR1 also changed Data Index `ProcessDefinitions.serviceUrl` to a relative path (SRVLOGIC-1137). The current `osl-di-rewrite` proxy hides that from Playwright. There is no pre-Playwright check against the **raw** Data Index.
 
@@ -14,12 +14,10 @@ Make the default OSL RC path (`--all` / `make osl-regression`) a **lean OSL cont
 
 1. Probe raw Data Index GraphQL before Playwright.
 2. Run exactly four Playwright tests (Greeting, Failswitch statuses, Failswitch retrigger, token-propagation).
-3. Keep `--full-e2e` as the RHDH **plugin** regression gate, not the OSL CR default.
 
 ## In scope (this repo: `rhdh-test-instance`)
 
-- Python helper + unit tests for smoke titles, Playwright `-g` regex, and GraphQL contract classification.
-- `run-osl-regression.sh` wiring: probe, default grep, `--allow-relative-service-url`.
+- `run-osl-regression.sh` wiring: raw Data Index GraphQL probe (`jq`), default Playwright `--grep` of the four titles, `--allow-relative-service-url`.
 - Smoke wrapper always registers token-propagation tests (no env flag).
 - Always deploy `sample-server` + `token-propagation` on the smoke path (same Keycloak substitutions overlays uses).
 - README / Makefile copy.
@@ -56,16 +54,16 @@ Default `--test` / `--all` always:
 - Includes that title in the Playwright grep.
 - Waits for `deployment/token-propagation` Ready before the GraphQL probe.
 
-There is no `--include-token-propagation` flag.
+There is no `--include-token-propagation` or `--full-e2e` flag. `--cleanup` always removes operators, catalog, and mirror (the former `--include-operators` behavior).
 
-## `--full-e2e`
+## `--allow-relative-service-url`
 
-Unchanged: runs overlays `--project=orchestrator` with no smoke wrapper and no title grep. Document as the plugin-release suite (RBAC, entity, ui:props, Loki, all workflows).
+OSL 1.39.CR1 Data Index can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137). The Orchestrator plugin then cannot execute/abort/retrigger workflows. The smoke probe queries **raw** Data Index and exits 2 on that contract break. Pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1` to warn and continue so Playwright can still run behind `osl-di-rewrite`. Remove the override after the plugin derives `serviceUrl` from `endpoint`.
 
 ## Constraints
 
 - Do not commit `.env`, `.env.osl`, cluster passwords, or Keycloak secrets.
 - Do not edit files outside `rhdh-test-instance` for this spec.
-- Python helpers: stdlib only (`unittest`, `json`, `urllib`/`json` parsing). No new pip deps.
+- Driver is bash (`run-osl-regression.sh`). Classify GraphQL with `jq`. Do not add Python helper modules.
 - `oc` / `helm` may live in `/home/rlan/bin`; driver already assumes they are on `PATH`.
 - Conventional commits; reference `#13375`.

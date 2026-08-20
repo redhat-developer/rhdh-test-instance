@@ -26,7 +26,8 @@
             callbackUrl: '${RHDH_BASE_URL}/api/auth/oidc/handler/frame'
             signIn:
               resolvers:
-                - resolver: emailLocalPartMatchingUserEntityName
+                - resolver: preferredUsernameMatchingUserEntityName
+                  dangerouslyAllowSignInWithoutUserInCatalog: true
         guest:
           dangerouslyAllowOutsideDevelopment: false
     signInPage: oidc

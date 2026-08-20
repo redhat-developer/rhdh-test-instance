@@ -7,7 +7,7 @@
 #
 # Usage:
 #   ./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1
-#   ./run-osl-regression.sh --cleanup --include-operators --namespace orchestrator
+#   ./run-osl-regression.sh --cleanup --namespace orchestrator
 #   ./run-osl-regression.sh --test --overlays-dir ../rhdh-plugin-export-overlays
 #
 set -euo pipefail
@@ -24,6 +24,7 @@ KEYCLOAK_RELEASE="keycloak"
 RHDH_RELEASE="redhat-developer-hub"
 SMOKE_WRAPPER_SRC="${SCRIPT_DIR}/playwright/osl-regression-smoke.spec.ts"
 SMOKE_WRAPPER_NAME="osl-regression-smoke.spec.ts"
+SMOKE_GREP='Run Greeting workflow and verify Workflows tab|Run Failswitch workflow and verify statuses|Rerun Failswitch from failure point|Execute token-propagation workflow via API'
 WORKFLOW_REPO="${SERVERLESS_WORKFLOWS_REPO:-https://github.com/rhdhorchestrator/serverless-workflows.git}"
 WORKFLOW_REPO_REF="${SERVERLESS_WORKFLOWS_REF:-daeeee8dec16beab6d96a81774ef500081a2c2b0}"
 DEMO_WORKFLOW_REPO="${ORCHESTRATOR_DEMO_REPO:-https://github.com/rhdhorchestrator/orchestrator-demo.git}"
@@ -33,8 +34,6 @@ run_cleanup=false
 run_prepare=false
 run_deploy=false
 run_test=false
-include_operators=false
-full_e2e=false
 allow_relative_service_url=false
 rhdh=""
 osl_release=""
@@ -47,7 +46,11 @@ usage() {
 Usage: $0 [--all] [--cleanup] [--prepare-osl] [--deploy] [--test] [options]
 
 Phases (any subset; always run in this order): cleanup, prepare-osl, deploy, test.
-  --all                         Run all four phases; cleanup includes operators
+  --all                         Run all four phases
+  --cleanup                     Remove RHDH, Keycloak, workflows, OSL operators, catalog, and mirror
+  --prepare-osl                 Mirror OSL images and create CatalogSource
+  --deploy                      Deploy Keycloak + RHDH + orchestrator
+  --test                        Probe Data Index, then run the four Playwright smoke tests
 
 Options:
   --rhdh <version>              RHDH version (required with --deploy / --all)
@@ -55,9 +58,14 @@ Options:
   --osl-manifest <path>         Explicit OSL manifest path
   --namespace <ns>              RHDH/orchestrator namespace (default: orchestrator)
   --overlays-dir <path>         rhdh-plugin-export-overlays checkout
-  --include-operators           Cleanup also removes operators/catalog/mirror
-  --full-e2e                    Full overlays orchestrator Playwright project
-  --allow-relative-service-url  Continue smoke if Data Index serviceUrl is relative
+  --allow-relative-service-url  OSL 1.39 Data Index may return a relative
+                                ProcessDefinitions.serviceUrl (SRVLOGIC-1137).
+                                The GraphQL probe fails on that by default.
+                                This flag (or ALLOW_RELATIVE_SERVICE_URL=1)
+                                warns and continues so Playwright can run
+                                behind the osl-di-rewrite proxy. Drop this
+                                after the Orchestrator plugin derives
+                                serviceUrl from endpoint.
   -h, --help                    Show this help
 EOF
 }
@@ -81,8 +89,6 @@ while [[ $# -gt 0 ]]; do
         --osl-manifest)       osl_manifest="${2:-}"; shift 2 ;;
         --namespace)          namespace="${2:-}"; shift 2 ;;
         --overlays-dir)       overlays_dir="${2:-}"; shift 2 ;;
-        --include-operators)  include_operators=true; shift ;;
-        --full-e2e)           full_e2e=true; shift ;;
         --allow-relative-service-url) allow_relative_service_url=true; shift ;;
         -h|--help)            usage; exit 0 ;;
         *)                    usage; die "unknown option: $1" ;;
@@ -94,7 +100,6 @@ if [[ "$run_all" == "true" ]]; then
     run_prepare=true
     run_deploy=true
     run_test=true
-    include_operators=true
 fi
 
 if [[ "$run_cleanup" != "true" && "$run_prepare" != "true" && "$run_deploy" != "true" && "$run_test" != "true" ]]; then
@@ -127,7 +132,6 @@ preflight() {
     if [[ "$run_prepare" == "true" ]]; then
         require_cmd podman
         require_cmd skopeo
-        require_cmd python
         local manifest
         manifest="$(resolve_manifest)"
         [[ -n "$manifest" ]] || die "--prepare-osl requires --osl-release or --osl-manifest"
@@ -301,40 +305,23 @@ ensure_token_propagation_workflow() {
     props_cm="${manifests_dir}/01-configmap_token-propagation-props.yaml"
     specs_cm="${manifests_dir}/03-configmap_02-token-propagation-resources-specs.yaml"
     [[ -f "$props_cm" && -f "$specs_cm" ]] || die "token-propagation manifests missing in $DEMO_WORKFLOW_REPO"
-    python3 - "$ns" "$props_cm" "$specs_cm" <<'PY'
-from pathlib import Path
-import os
-import sys
-
-ns, props_path, specs_path = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
-kc = os.environ["KEYCLOAK_BASE_URL"].rstrip("/")
-realm = os.environ.get("KEYCLOAK_REALM", "rhdh")
-client_id = os.environ.get("KEYCLOAK_CLIENT_ID", "rhdh-client")
-client_secret = os.environ.get("KEYCLOAK_CLIENT_SECRET", "rhdh-client-secret")
-auth_server_url = f"{kc}/realms/{realm}"
-token_url = f"{auth_server_url}/protocol/openid-connect/token"
-props = props_path.read_text()
-props = props.replace(
-    "http://example-kc-service.keycloak:8080/realms/quarkus",
-    auth_server_url,
-)
-props = props.replace("client-id=quarkus-app", f"client-id={client_id}")
-props = props.replace(
-    "client-secret=lVGSvdaoDUem7lqeAnqXn1F92dCPbQea",
-    f"client-secret={client_secret}",
-)
-props = props.replace(
-    "http://sample-server-service.rhdh-operator",
-    f"http://sample-server-service.{ns}:8080",
-)
-props_path.write_text(props)
-specs_path.write_text(
-    specs_path.read_text().replace(
-        "http://example-kc-service.keycloak:8080/realms/quarkus/protocol/openid-connect/token",
-        token_url,
-    )
-)
-PY
+    local kc_base realm client_id client_secret auth_server_url token_url sample_url
+    kc_base="${KEYCLOAK_BASE_URL%/}"
+    realm="${KEYCLOAK_REALM:-rhdh}"
+    client_id="${KEYCLOAK_CLIENT_ID:-rhdh-client}"
+    client_secret="${KEYCLOAK_CLIENT_SECRET:-rhdh-client-secret}"
+    auth_server_url="${kc_base}/realms/${realm}"
+    token_url="${auth_server_url}/protocol/openid-connect/token"
+    sample_url="http://sample-server-service.${ns}:8080"
+    sed -i \
+        -e "s|http://example-kc-service.keycloak:8080/realms/quarkus|${auth_server_url}|g" \
+        -e "s|client-id=quarkus-app|client-id=${client_id}|g" \
+        -e "s|client-secret=lVGSvdaoDUem7lqeAnqXn1F92dCPbQea|client-secret=${client_secret}|g" \
+        -e "s|http://sample-server-service.rhdh-operator|${sample_url}|g" \
+        "$props_cm"
+    sed -i \
+        -e "s|http://example-kc-service.keycloak:8080/realms/quarkus/protocol/openid-connect/token|${token_url}|g" \
+        "$specs_cm"
     oc apply -n "$ns" -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -451,9 +438,6 @@ write_overlays_dotenv() {
 K8S_CLUSTER_ROUTER_BASE=${K8S_CLUSTER_ROUTER_BASE}
 RHDH_BASE_URL=${RHDH_BASE_URL}
 RHDH_VERSION=${RHDH_VERSION:-}
-ORCH_E2E_USE_EXISTING_RHDH=true
-ORCH_E2E_SKIP_WORKFLOW_DEPLOY=false
-ORCH_E2E_SKIP_BASELINE_RBAC=false
 SKIP_KEYCLOAK_DEPLOYMENT=true
 SKIP_OPERATOR_INSTALLATION=true
 GH_USER_ID=test1
@@ -478,12 +462,8 @@ restore_overlays_dotenv() {
 }
 
 phase_cleanup() {
-    log "[cleanup] namespace=${namespace} include_operators=${include_operators}"
-    local args=(--namespace "$namespace")
-    if [[ "$include_operators" == "true" ]]; then
-        args+=(--include-operators)
-    fi
-    "${SCRIPT_DIR}/cleanup.sh" "${args[@]}"
+    log "[cleanup] namespace=${namespace} (includes operators/catalog/mirror)"
+    "${SCRIPT_DIR}/cleanup.sh" --namespace "$namespace" --include-operators
 }
 
 phase_prepare() {
@@ -571,23 +551,19 @@ EOF
     oc rollout status "deploy/${name}" -n "$ns" --timeout=180s >/dev/null
     oidc_tmp="$(mktemp)"
     oc get configmap app-config-oidc -n "$ns" -o jsonpath='{.data.app-config-oidc\.yaml}' > "$oidc_tmp"
-    python - "$oidc_tmp" "$rewrite_url" <<'PY'
-from pathlib import Path
-import sys
-path = Path(sys.argv[1])
-url = sys.argv[2]
-text = path.read_text()
-lines = []
-replaced = False
-for line in text.splitlines():
-    if line.strip().startswith("url:") and not replaced:
-        indent = line[: len(line) - len(line.lstrip())]
-        lines.append(f"{indent}url: {url}")
-        replaced = True
-    else:
-        lines.append(line)
-path.write_text("\n".join(lines) + "\n")
-PY
+    awk -v url="$rewrite_url" '
+        BEGIN { done = 0 }
+        {
+            if (!done && $0 ~ /^[[:space:]]*url:/) {
+                match($0, /^[[:space:]]*/)
+                print substr($0, 1, RLENGTH) "url: " url
+                done = 1
+                next
+            }
+            print
+        }
+    ' "$oidc_tmp" > "${oidc_tmp}.new"
+    mv "${oidc_tmp}.new" "$oidc_tmp"
     oc create configmap app-config-oidc \
         --from-file=app-config-oidc.yaml="$oidc_tmp" \
         -n "$ns" --dry-run=client -o yaml | oc apply -f - >/dev/null
@@ -595,6 +571,39 @@ PY
     oc rollout restart "deploy/redhat-developer-hub" -n "$ns" >/dev/null
     oc rollout status "deploy/redhat-developer-hub" -n "$ns" --timeout=300s >/dev/null
     log "data-index rewrite proxy ready (${rewrite_url})"
+}
+
+probe_raw_dataindex() {
+    local ns="$1" allow="$2"
+    local body url json count problems
+    body='{"query":"{ ProcessDefinitions { id serviceUrl endpoint } }"}'
+    url="http://sonataflow-platform-data-index-service.${ns}.svc.cluster.local/graphql"
+    log "probing raw Data Index GraphQL ProcessDefinitions.serviceUrl"
+    json="$(oc exec -n "$ns" deploy/redhat-developer-hub -- \
+        curl -sS -X POST -H "Content-Type: application/json" -d "$body" "$url")" \
+        || die "oc exec curl of Data Index GraphQL failed"
+    if ! printf '%s' "$json" | jq -e . >/dev/null 2>&1; then
+        die "Data Index did not return JSON: ${json:0:500}"
+    fi
+    if printf '%s' "$json" | jq -e '.errors != null and (.errors | length) > 0' >/dev/null; then
+        printf '%s\n' "$json" | jq '.errors' >&2
+        die "Data Index GraphQL returned errors"
+    fi
+    count="$(printf '%s' "$json" | jq '.data.ProcessDefinitions | length // 0')"
+    if [[ "$count" -eq 0 ]]; then
+        printf '%s\n' '{"ok":false,"problems":[{"id":null,"serviceUrl":null,"endpoint":null,"reason":"no-process-definitions"}]}' >&2
+        exit 1
+    fi
+    problems="$(printf '%s' "$json" | jq '[.data.ProcessDefinitions[] | select((.serviceUrl | type != "string") or ((.serviceUrl | startswith("http://") or startswith("https://")) | not)) | {id, serviceUrl, endpoint, reason: "relative-or-missing-serviceUrl"}]')"
+    if [[ "$(printf '%s' "$problems" | jq 'length')" -gt 0 ]]; then
+        printf '%s\n' "$problems" | jq '{ok:false, problems:.}' >&2
+        if [[ "$allow" == "true" ]]; then
+            log "WARNING: relative/missing serviceUrl allowed by ALLOW_RELATIVE_SERVICE_URL"
+            return 0
+        fi
+        exit 2
+    fi
+    printf '%s\n' '{"ok":true,"problems":[]}' >&2
 }
 
 phase_deploy() {
@@ -613,15 +622,11 @@ phase_deploy() {
 phase_test() {
     log "[test]"
     overlays_dir="$(cd "$overlays_dir" && pwd)"
-    local e2e smoke_spec="" backup="" rc=0 smoke_grep=""
-    local -a probe_args
+    local e2e smoke_spec="" backup="" rc=0 allow_relative=false
     e2e="$(overlays_e2e_dir)"
     ensure_e2e_deps "$e2e"
 
     export K8S_CLUSTER_ROUTER_BASE RHDH_BASE_URL KEYCLOAK_BASE_URL RHDH_VERSION
-    export ORCH_E2E_USE_EXISTING_RHDH=true
-    export ORCH_E2E_SKIP_WORKFLOW_DEPLOY=false
-    export ORCH_E2E_SKIP_BASELINE_RBAC=false
     export SKIP_KEYCLOAK_DEPLOYMENT=true
     export SKIP_OPERATOR_INSTALLATION=true
     export GH_USER_ID=test1
@@ -645,31 +650,21 @@ phase_test() {
     }
     trap cleanup_test_artifacts EXIT
 
-    if [[ "$full_e2e" != "true" ]]; then
-        ensure_smoke_workflows "$namespace"
-        probe_args=(python3 "${SCRIPT_DIR}/utils/orchestrator/osl_smoke.py" probe --namespace "$namespace")
-        if [[ "$allow_relative_service_url" == "true" || "${ALLOW_RELATIVE_SERVICE_URL:-}" == "1" ]]; then
-            probe_args+=(--allow-relative)
-        fi
-        log "probing raw Data Index GraphQL ProcessDefinitions.serviceUrl"
-        "${probe_args[@]}"
-        smoke_spec="${e2e}/tests/${SMOKE_WRAPPER_NAME}"
-        cp -a "$SMOKE_WRAPPER_SRC" "$smoke_spec"
+    ensure_smoke_workflows "$namespace"
+    if [[ "$allow_relative_service_url" == "true" || "${ALLOW_RELATIVE_SERVICE_URL:-}" == "1" ]]; then
+        allow_relative=true
     fi
+    probe_raw_dataindex "$namespace" "$allow_relative"
+    smoke_spec="${e2e}/tests/${SMOKE_WRAPPER_NAME}"
+    cp -a "$SMOKE_WRAPPER_SRC" "$smoke_spec"
 
     local pw
     pw="$(playwright_cmd "$e2e")"
     log "Playwright: ${pw} (cwd=${e2e})"
+    log "Playwright grep: ${SMOKE_GREP}"
     set +e
-    if [[ "$full_e2e" == "true" ]]; then
-        # shellcheck disable=SC2086
-        (cd "$e2e" && $pw test --project=orchestrator --workers=1)
-    else
-        smoke_grep="$(python3 "${SCRIPT_DIR}/utils/orchestrator/osl_smoke.py" grep)"
-        log "Playwright grep: ${smoke_grep}"
-        # shellcheck disable=SC2086
-        (cd "$e2e" && $pw test --project=orchestrator --workers=1 --grep "$smoke_grep" "$smoke_spec")
-    fi
+    # shellcheck disable=SC2086
+    (cd "$e2e" && $pw test --project=orchestrator --workers=1 --grep "$SMOKE_GREP" "$smoke_spec")
     rc=$?
     set -e
 
@@ -681,7 +676,7 @@ phase_test() {
         log "Playwright failed (exit ${rc}); report: ${e2e}/playwright-report"
         exit "$rc"
     fi
-    log "Playwright smoke/full suite passed"
+    log "Playwright smoke passed"
 }
 
 preflight

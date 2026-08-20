@@ -188,20 +188,21 @@ Pin an OSL pre-release against a chosen RHDH version, deploy, and run the defaul
 3. `Rerun Failswitch from failure point`
 4. `Execute token-propagation workflow via API`
 
-Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). A GraphQL probe hits the raw Data Index (`sonataflow-platform-data-index-service`) and fails if `ProcessDefinitions.serviceUrl` is relative unless you pass `--allow-relative-service-url` (needed on 1.39.CR1 until the Orchestrator plugin derives `serviceUrl` from `endpoint`; SRVLOGIC-1137). `--full-e2e` is the RHDH plugin suite (RBAC, entity, ui:props, Loki, all workflows), not the OSL CR default.
+Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators, the custom catalog, and the mirror namespace as well as the RHDH namespace contents.
+
+Before Playwright, a GraphQL probe hits the **raw** Data Index (`sonataflow-platform-data-index-service`), not the `osl-di-rewrite` proxy. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137). The Orchestrator plugin then cannot `POST` to execute/abort/retrigger. The probe exits 2 on that unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`, which prints a warning and continues so the four tests can still run behind the rewrite proxy. Drop that override after the plugin derives `serviceUrl` from `endpoint`.
 
 ```bash
-# One-shot: cleanup (including operators) -> mirror OSL -> deploy -> smoke
+# One-shot: full cleanup (including operators) -> mirror OSL -> deploy -> smoke
 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator
-# 1.39.CR1 currently needs the DI contract override:
+# 1.39.CR1 currently needs the relative-serviceUrl override:
 ALLOW_RELATIVE_SERVICE_URL=1 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator
 
 # Or call the driver directly
 ./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1 --namespace orchestrator
-./run-osl-regression.sh --cleanup --include-operators --namespace orchestrator
-# 1.39.CR1 currently needs the DI contract override plus rewrite proxy:
+./run-osl-regression.sh --cleanup --namespace orchestrator
+./run-osl-regression.sh --cleanup --prepare-osl --deploy --rhdh next --osl-release 1.39.0.CR1
 ALLOW_RELATIVE_SERVICE_URL=1 ./run-osl-regression.sh --test --namespace orchestrator
-./run-osl-regression.sh --test --full-e2e --namespace orchestrator
 ./run-osl-regression.sh --test --overlays-dir ../rhdh-plugin-export-overlays
 ```
 
@@ -238,6 +239,7 @@ All make commands accept these variables:
 | `RUNNER_IMAGE`      | `quay.io/rhdh-community/rhdh-e2e-runner:main` | Container image for `install-operator`                                    |
 | `OSL_RELEASE`       | _(empty)_                                     | OSL pre-release id for `prepare-osl` / `osl-regression`                   |
 | `ORCH_NAMESPACE`    | `orchestrator`                                | Namespace used by orchestrator/OSL setup and cleanup                      |
+| `ALLOW_RELATIVE_SERVICE_URL` | _(unset)_                          | Set to `1` to continue smoke after a relative Data Index `serviceUrl`     |
 
 > **Note:** `install-operator` requires you to be logged into the cluster via `oc login` on your host.
 > It automatically passes the session token to the e2e-runner container (needs Linux tools like `umoci`, `opm`, `skopeo`).

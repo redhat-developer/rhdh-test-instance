@@ -1,0 +1,29 @@
+plugins:
+  - package: 'oci://quay.io/rhdh/red-hat-developer-hub-backstage-plugin-orchestrator:{{inherit}}'
+    disabled: false
+    pluginConfig:
+      dynamicPlugins:
+        frontend:
+          red-hat-developer-hub.backstage-plugin-orchestrator:
+            pluginModule: Alpha
+            appIcons:
+              - name: orchestratorIcon
+                importName: OrchestratorIcon
+            dynamicRoutes:
+              - path: /orchestrator
+                importName: OrchestratorPage
+                menuItem:
+                  icon: orchestratorIcon
+                  text: Orchestrator
+                  textKey: menuItem.orchestrator
+            menuItems:
+              orchestrator:
+                icon: orchestratorIcon
+  - package: 'oci://quay.io/rhdh/red-hat-developer-hub-backstage-plugin-orchestrator-backend:{{inherit}}'
+    disabled: false
+    dependencies:
+      - ref: sonataflow
+  - package: 'oci://quay.io/rhdh/red-hat-developer-hub-backstage-plugin-scaffolder-backend-module-orchestrator:{{inherit}}'
+    disabled: false
+  - package: 'oci://quay.io/rhdh/red-hat-developer-hub-backstage-plugin-orchestrator-form-widgets:{{inherit}}'
+    disabled: false

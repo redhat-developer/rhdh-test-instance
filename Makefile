@@ -83,8 +83,8 @@ endif
 setup-orchestrator: ## Full RHDH + orchestrator setup (VERSION, ORCH_NAMESPACE, OSL_RELEASE)
 	./setup-orchestrator.sh $(VERSION) --namespace $(ORCH_NAMESPACE) $(if $(filter-out ,$(OSL_RELEASE)),--prepare-internal-osl $(OSL_RELEASE))
 
-cleanup: ## Clean RHDH/orchestrator/OSL resources from ORCH_NAMESPACE
-	./cleanup.sh --namespace $(ORCH_NAMESPACE)
+cleanup: ## Clean RHDH/orchestrator/OSL resources and operators from ORCH_NAMESPACE
+	./cleanup.sh --namespace $(ORCH_NAMESPACE) --include-operators
 
 cleanup-full: ## Full cleanup: operators + related namespaces
 	./cleanup.sh --namespace $(ORCH_NAMESPACE) --include-operators --delete-namespace

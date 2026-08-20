@@ -1,12 +1,14 @@
 # OSL RC smoke subset Implementation Plan
 
+> **Implementation note (2026-08-20):** Do not add Python helpers. The approved architecture is the earlier **Lean OSL smoke bash** plan: `run-osl-regression.sh` only, GraphQL classification with `jq`, Playwright `--grep` as a bash constant. The task bodies below that mention `osl_smoke.py` / `test_osl_smoke.py` are obsolete.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Default OSL RC `--test` probes raw Data Index GraphQL, then runs four Playwright tests (Greeting + Failswitch statuses + retrigger + token-propagation).
 
-**Architecture:** Extract classification and Playwright grep into a stdlib Python module with unittest. The existing bash driver always deploys greeting, failswitch, and token-propagation, calls the probe, then Playwright `-g` for the four titles. Do not change overlays git files; keep copying `playwright/osl-regression-smoke.spec.ts` at runtime.
+**Architecture:** Keep the existing bash driver. It always deploys greeting, failswitch, and token-propagation, probes raw Data Index with `oc exec` + `jq`, then Playwright `-g` for the four titles. Do not change overlays git files; keep copying `playwright/osl-regression-smoke.spec.ts` at runtime.
 
-**Tech Stack:** bash, Python 3 stdlib unittest, oc, Playwright (overlays e2e-tests), existing smoke wrapper.
+**Tech Stack:** bash, jq, oc, Playwright (overlays e2e-tests), existing smoke wrapper.
 
 **Spec:** `docs/superpowers/specs/2026-08-20-osl-rc-smoke-subset.md`
 
@@ -15,10 +17,10 @@
 - Repo: `rhdh-test-instance` only, branch `feat/rhidp-13375-osl-smoke`, worktree `/home/rlan/redhat/rhdh-test-instance/.worktrees/rhidp-13375-osl-smoke`.
 - Do not edit `rhdh-plugin-export-overlays`, `rhdh-plugins`, or `rhdh-e2e-test-utils`.
 - Do not commit `.env`, `.env.osl`, or cluster credentials.
-- Python helpers: stdlib only. No new pip packages.
+- Driver is bash. Classify GraphQL with `jq`. Do not add Python helper modules.
 - Default Playwright titles (exact): `Run Greeting workflow and verify Workflows tab`, `Run Failswitch workflow and verify statuses`, `Rerun Failswitch from failure point`, `Execute token-propagation workflow via API`.
 - Probe the raw Data Index service, never `osl-di-rewrite`.
-- `--full-e2e` must keep running the full overlays orchestrator project with no title grep.
+- Driver `--cleanup` always includes operators/catalog/mirror. No `--full-e2e` flag.
 - Commit messages: conventional commits, include `#13375`.
 - `export PATH="/home/rlan/bin:$HOME/.local/bin:$PATH"` before any `oc` command.
 
@@ -28,11 +30,9 @@
 
 | File | Responsibility |
 |---|---|
-| `utils/orchestrator/osl_smoke.py` | Smoke titles, Playwright `-g` regex, GraphQL JSON classification, `probe` CLI |
-| `utils/orchestrator/test_osl_smoke.py` | unittest for titles, grep, URL classification, probe JSON |
-| `run-osl-regression.sh` | `--allow-relative-service-url`, always deploy token-propagation on smoke, call probe, pass `-g` |
+| `run-osl-regression.sh` | `--allow-relative-service-url`, always deploy token-propagation on smoke, probe raw Data Index with `jq`, pass `--grep` |
 | `playwright/osl-regression-smoke.spec.ts` | Always register token-propagation tests |
-| `README.md` | Default 4-test smoke, probe, `--full-e2e` = plugin gate |
+| `README.md` | Default 4-test smoke, probe, `--allow-relative-service-url` |
 | `Makefile` | Pass-through `ALLOW_RELATIVE_SERVICE_URL=1` |
 
 Do **not** implement Orchestrator plugin `serviceUrl` derivation here. That is `docs/superpowers/plans/2026-08-20-orchestrator-serviceurl-from-endpoint.md`.
@@ -714,8 +714,7 @@ On a logged-in cluster with RHDH already up:
 ```bash
 export PATH="/home/rlan/bin:$HOME/.local/bin:$PATH"
 cd /home/rlan/redhat/rhdh-test-instance/.worktrees/rhidp-13375-osl-smoke
-python3 utils/orchestrator/osl_smoke.py probe --namespace orchestrator; echo exit:$?
-# 1.39.CR1 expected: exit 2, problems reason relative-or-missing-serviceUrl
+# 1.39.CR1 expected: probe exit 2 unless ALLOW_RELATIVE_SERVICE_URL=1
 ALLOW_RELATIVE_SERVICE_URL=1 ./run-osl-regression.sh --test --namespace orchestrator
 ```
 
@@ -729,4 +728,4 @@ Do not treat this cluster run as part of the git tasks; it is the human/agent ga
 
 1. **Spec coverage:** 4-test default including token-propagation → Tasks 1, 3, 4. GraphQL probe → Task 2. `--full-e2e` as plugin suite → Task 3 README. Makefile → Task 5. Plugin `serviceUrl` productization → sibling plan, not this file.
 2. **Placeholders:** none.
-3. **Types:** `playwright_grep() -> str` (four titles, no `include_token` argument), `classify_definitions(...) -> dict` with `ok`/`problems`, probe exit 0/1/2, `--allow-relative` matches `ALLOW_RELATIVE_SERVICE_URL=1`. No `--include-token-propagation`.
+3. **Types:** bash `SMOKE_GREP` (four titles), probe exit 0/1/2, `--allow-relative-service-url` matches `ALLOW_RELATIVE_SERVICE_URL=1`. No `--include-token-propagation`. No Python helper modules.

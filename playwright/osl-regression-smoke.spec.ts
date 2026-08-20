@@ -77,16 +77,6 @@ test.beforeEach(async ({ page }) => {
     return loc;
   };
 
-  const origGetByTestId = page.getByTestId.bind(page);
-  page.getByTestId = (testId, options) => {
-    if (testId === "info-card-subheader") {
-      return page
-        .getByRole("heading", { name: /^Run status$/i })
-        .locator("xpath=following-sibling::*");
-    }
-    return origGetByTestId(testId, options);
-  };
-
   const assertions = Object.getPrototypeOf(expect(page.locator("body")));
   if (assertions && !assertions.__oslPatchedToHaveText && assertions.toHaveText) {
     const origToHaveText = assertions.toHaveText;
