@@ -121,5 +121,13 @@ class TestProbeArgv(unittest.TestCase):
         self.assertIn("ProcessDefinitions", q)
 
 
+class TestDriverGrepWiring(unittest.TestCase):
+    def test_run_script_mentions_osl_smoke_grep(self):
+        text = Path(__file__).resolve().parents[2].joinpath("run-osl-regression.sh").read_text()
+        self.assertIn("osl_smoke.py", text)
+        self.assertIn("grep", text)
+        self.assertIn("--grep", text)
+
+
 if __name__ == "__main__":
     unittest.main()

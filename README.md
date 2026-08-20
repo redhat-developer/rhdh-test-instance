@@ -179,6 +179,40 @@ make undeploy-infra
 make clean
 ```
 
+#### OSL RC smoke
+
+Pin an OSL pre-release against a chosen RHDH version, deploy, and run the default four Playwright tests (skips `orchestrator.spec.ts` beforeAll so it does not reinstall operators):
+
+1. `Run Greeting workflow and verify Workflows tab`
+2. `Run Failswitch workflow and verify statuses`
+3. `Rerun Failswitch from failure point`
+4. `Execute token-propagation workflow via API`
+
+Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`. A GraphQL probe hits the raw Data Index (`sonataflow-platform-data-index-service`) and fails if `ProcessDefinitions.serviceUrl` is relative unless you pass `--allow-relative-service-url` (needed on 1.39.CR1 until the Orchestrator plugin derives `serviceUrl` from `endpoint`; SRVLOGIC-1137). `--full-e2e` is the RHDH plugin suite (RBAC, entity, ui:props, Loki, all workflows), not the OSL CR default.
+
+```bash
+# One-shot: cleanup (including operators) -> mirror OSL -> deploy -> smoke
+make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator
+
+# Or call the driver directly
+./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1 --namespace orchestrator
+./run-osl-regression.sh --cleanup --include-operators --namespace orchestrator
+# 1.39.CR1 currently needs the DI contract override plus rewrite proxy:
+ALLOW_RELATIVE_SERVICE_URL=1 ./run-osl-regression.sh --test --namespace orchestrator
+./run-osl-regression.sh --test --full-e2e --namespace orchestrator
+./run-osl-regression.sh --test --overlays-dir ../rhdh-plugin-export-overlays
+```
+
+Individual pieces:
+
+```bash
+make prepare-osl OSL_RELEASE=1.39.0.CR1
+make setup-orchestrator VERSION=next ORCH_NAMESPACE=orchestrator OSL_RELEASE=1.39.0.CR1
+make cleanup-full ORCH_NAMESPACE=orchestrator
+```
+
+Requires `oc` logged in, `helm`, `skopeo`, `podman`, and a sibling `rhdh-plugin-export-overlays` checkout for `--test`. Manifests live in `config/osl-releases/`.
+
 #### Status and Debugging
 
 ```bash
@@ -200,6 +234,8 @@ All make commands accept these variables:
 | `USE_CONTAINER`     | `false`                                       | Set to `true` to run commands inside the e2e-runner container             |
 | `CATALOG_INDEX_TAG` | auto                                          | Catalog index image tag (defaults to major.minor from version, or `next`) |
 | `RUNNER_IMAGE`      | `quay.io/rhdh-community/rhdh-e2e-runner:main` | Container image for `install-operator`                                    |
+| `OSL_RELEASE`       | _(empty)_                                     | OSL pre-release id for `prepare-osl` / `osl-regression`                   |
+| `ORCH_NAMESPACE`    | `orchestrator`                                | Namespace used by orchestrator/OSL setup and cleanup                      |
 
 > **Note:** `install-operator` requires you to be logged into the cluster via `oc login` on your host.
 > It automatically passes the session token to the e2e-runner container (needs Linux tools like `umoci`, `opm`, `skopeo`).

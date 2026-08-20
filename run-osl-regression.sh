@@ -2,8 +2,8 @@
 #
 # Thin OSL RC regression driver (RHIDP-13375).
 # Phases: cleanup -> prepare-osl -> deploy -> test.
-# Smoke Playwright skips overlays orchestrator.spec.ts beforeAll and only
-# registers greeting/failswitch tests via playwright/osl-regression-smoke.spec.ts.
+# Smoke Playwright skips overlays orchestrator.spec.ts beforeAll and greps
+# four titles via playwright/osl-regression-smoke.spec.ts.
 #
 # Usage:
 #   ./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1
@@ -486,7 +486,7 @@ phase_deploy() {
 phase_test() {
     log "[test]"
     overlays_dir="$(cd "$overlays_dir" && pwd)"
-    local e2e smoke_spec="" backup="" rc=0
+    local e2e smoke_spec="" backup="" rc=0 smoke_grep=""
     local -a probe_args
     e2e="$(overlays_e2e_dir)"
     ensure_e2e_deps "$e2e"
@@ -538,8 +538,10 @@ phase_test() {
         # shellcheck disable=SC2086
         (cd "$e2e" && $pw test --project=orchestrator --workers=1)
     else
+        smoke_grep="$(python3 "${SCRIPT_DIR}/utils/orchestrator/osl_smoke.py" grep)"
+        log "Playwright grep: ${smoke_grep}"
         # shellcheck disable=SC2086
-        (cd "$e2e" && $pw test --project=orchestrator --workers=1 "$smoke_spec")
+        (cd "$e2e" && $pw test --project=orchestrator --workers=1 --grep "$smoke_grep" "$smoke_spec")
     fi
     rc=$?
     set -e
