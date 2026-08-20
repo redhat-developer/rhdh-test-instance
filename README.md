@@ -188,7 +188,7 @@ Pin an OSL pre-release against a chosen RHDH version, deploy, and run the defaul
 3. `Rerun Failswitch from failure point`
 4. `Execute token-propagation workflow via API`
 
-Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`. A GraphQL probe hits the raw Data Index (`sonataflow-platform-data-index-service`) and fails if `ProcessDefinitions.serviceUrl` is relative unless you pass `--allow-relative-service-url` (needed on 1.39.CR1 until the Orchestrator plugin derives `serviceUrl` from `endpoint`; SRVLOGIC-1137). `--full-e2e` is the RHDH plugin suite (RBAC, entity, ui:props, Loki, all workflows), not the OSL CR default.
+Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). A GraphQL probe hits the raw Data Index (`sonataflow-platform-data-index-service`) and fails if `ProcessDefinitions.serviceUrl` is relative unless you pass `--allow-relative-service-url` (needed on 1.39.CR1 until the Orchestrator plugin derives `serviceUrl` from `endpoint`; SRVLOGIC-1137). `--full-e2e` is the RHDH plugin suite (RBAC, entity, ui:props, Loki, all workflows), not the OSL CR default.
 
 ```bash
 # One-shot: cleanup (including operators) -> mirror OSL -> deploy -> smoke

@@ -26,6 +26,7 @@ SMOKE_WRAPPER_SRC="${SCRIPT_DIR}/playwright/osl-regression-smoke.spec.ts"
 SMOKE_WRAPPER_NAME="osl-regression-smoke.spec.ts"
 WORKFLOW_REPO="${SERVERLESS_WORKFLOWS_REPO:-https://github.com/rhdhorchestrator/serverless-workflows.git}"
 WORKFLOW_REPO_REF="${SERVERLESS_WORKFLOWS_REF:-daeeee8dec16beab6d96a81774ef500081a2c2b0}"
+DEMO_WORKFLOW_REPO="${ORCHESTRATOR_DEMO_REPO:-https://github.com/rhdhorchestrator/orchestrator-demo.git}"
 
 run_all=false
 run_cleanup=false
@@ -205,10 +206,34 @@ workflow_osl_image_tag() {
 }
 
 patch_smoke_workflow() {
-    local ns="$1" name="$2" tag="$3" image
+    local ns="$1" name="$2" tag="${3:-}" image persistence
+    persistence="{
+      \"spec\": {
+        \"persistence\": {
+          \"dbMigrationStrategy\": \"job\",
+          \"postgresql\": {
+            \"secretRef\": {
+              \"name\": \"backstage-psql-secret\",
+              \"userKey\": \"POSTGRES_USER\",
+              \"passwordKey\": \"POSTGRES_PASSWORD\"
+            },
+            \"serviceRef\": {
+              \"name\": \"backstage-psql\",
+              \"namespace\": \"${ns}\",
+              \"databaseName\": \"backstage_plugin_orchestrator\",
+              \"databaseSchema\": \"${name}\"
+            }
+          }
+        }
+      }
+    }"
     case "$name" in
         greeting)   image="quay.io/orchestrator/serverless-workflow-greeting:osl_${tag}" ;;
         failswitch) image="quay.io/orchestrator/fail-switch:osl_${tag}" ;;
+        token-propagation)
+            oc -n "$ns" patch sonataflow "$name" --type merge -p "$persistence" >/dev/null || true
+            return 0
+            ;;
         *) die "unknown smoke workflow: $name" ;;
     esac
     oc -n "$ns" patch sonataflow "$name" --type merge -p "{
@@ -244,7 +269,7 @@ wait_smoke_workflows_ready() {
     start="$(date +%s)"
     while true; do
         ready=true
-        for name in greeting failswitch; do
+        for name in greeting failswitch token-propagation; do
             local replicas
             replicas="$(oc get deployment "$name" -n "$ns" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
             if [[ "$replicas" != "1" ]]; then
@@ -252,15 +277,116 @@ wait_smoke_workflows_ready() {
             fi
         done
         if [[ "$ready" == "true" ]]; then
-            log "smoke workflows greeting/failswitch are ready"
+            log "smoke workflows greeting/failswitch/token-propagation are ready"
             return 0
         fi
         elapsed=$(( $(date +%s) - start ))
         if (( elapsed >= timeout_secs )); then
-            die "timeout waiting for greeting/failswitch deployments in $ns"
+            die "timeout waiting for greeting/failswitch/token-propagation deployments in $ns"
         fi
         sleep 10
     done
+}
+
+ensure_token_propagation_workflow() {
+    local ns="$1"
+    local demo_dir manifests_dir props_cm specs_cm
+    [[ -n "${KEYCLOAK_BASE_URL:-}" ]] || die "KEYCLOAK_BASE_URL is required for token-propagation smoke"
+    log "deploying token-propagation workflow and sample-server"
+    demo_dir="$(mktemp -d /tmp/osl-token-demo-XXXXXX)"
+    _osl_token_demo_cleanup() { rm -rf "$demo_dir"; trap - RETURN; }
+    trap _osl_token_demo_cleanup RETURN
+    git clone --depth 1 "$DEMO_WORKFLOW_REPO" "$demo_dir" >/dev/null
+    manifests_dir="${demo_dir}/09_token_propagation/manifests"
+    props_cm="${manifests_dir}/01-configmap_token-propagation-props.yaml"
+    specs_cm="${manifests_dir}/03-configmap_02-token-propagation-resources-specs.yaml"
+    [[ -f "$props_cm" && -f "$specs_cm" ]] || die "token-propagation manifests missing in $DEMO_WORKFLOW_REPO"
+    python3 - "$ns" "$props_cm" "$specs_cm" <<'PY'
+from pathlib import Path
+import os
+import sys
+
+ns, props_path, specs_path = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+kc = os.environ["KEYCLOAK_BASE_URL"].rstrip("/")
+realm = os.environ.get("KEYCLOAK_REALM", "rhdh")
+client_id = os.environ.get("KEYCLOAK_CLIENT_ID", "rhdh-client")
+client_secret = os.environ.get("KEYCLOAK_CLIENT_SECRET", "rhdh-client-secret")
+auth_server_url = f"{kc}/realms/{realm}"
+token_url = f"{auth_server_url}/protocol/openid-connect/token"
+props = props_path.read_text()
+props = props.replace(
+    "http://example-kc-service.keycloak:8080/realms/quarkus",
+    auth_server_url,
+)
+props = props.replace("client-id=quarkus-app", f"client-id={client_id}")
+props = props.replace(
+    "client-secret=lVGSvdaoDUem7lqeAnqXn1F92dCPbQea",
+    f"client-secret={client_secret}",
+)
+props = props.replace(
+    "http://sample-server-service.rhdh-operator",
+    f"http://sample-server-service.{ns}:8080",
+)
+props_path.write_text(props)
+specs_path.write_text(
+    specs_path.read_text().replace(
+        "http://example-kc-service.keycloak:8080/realms/quarkus/protocol/openid-connect/token",
+        token_url,
+    )
+)
+PY
+    oc apply -n "$ns" -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-server
+  labels:
+    app: sample-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sample-server
+  template:
+    metadata:
+      labels:
+        app: sample-server
+    spec:
+      containers:
+        - name: sample-server
+          image: quay.io/orchestrator/sample-server:latest
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-server-service
+  labels:
+    app: sample-server
+spec:
+  selector:
+    app: sample-server
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+EOF
+    oc wait deployment/sample-server -n "$ns" --for=condition=Available --timeout=120s
+    oc apply -n "$ns" -f "$manifests_dir"
+    patch_smoke_workflow "$ns" token-propagation
 }
 
 ensure_smoke_workflows() {
@@ -278,6 +404,7 @@ ensure_smoke_workflows() {
     rm -rf "$workflow_dir"
     patch_smoke_workflow "$ns" greeting "$tag"
     patch_smoke_workflow "$ns" failswitch "$tag"
+    ensure_token_propagation_workflow "$ns"
     wait_smoke_workflows_ready "$ns" 600
     oc rollout restart "deploy/sonataflow-platform-data-index-service" -n "$ns" >/dev/null 2>&1 || true
     oc rollout status "deploy/sonataflow-platform-data-index-service" -n "$ns" --timeout=180s >/dev/null 2>&1 || true

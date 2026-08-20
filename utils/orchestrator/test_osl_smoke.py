@@ -129,5 +129,23 @@ class TestDriverGrepWiring(unittest.TestCase):
         self.assertIn("--grep", text)
 
 
+class TestTokenSmokeWiring(unittest.TestCase):
+    def test_driver_always_deploys_token_propagation(self):
+        text = Path(__file__).resolve().parents[2].joinpath("run-osl-regression.sh").read_text()
+        self.assertIn("ensure_token_propagation_workflow", text)
+        self.assertIn("token-propagation", text)
+        self.assertNotIn("--include-token-propagation", text)
+        self.assertNotIn("OSL_SMOKE_TOKEN_PROPAGATION", text)
+
+    def test_smoke_wrapper_always_registers_token_tests(self):
+        text = (
+            Path(__file__).resolve().parents[2]
+            / "playwright"
+            / "osl-regression-smoke.spec.ts"
+        ).read_text()
+        self.assertIn("registerTokenPropagationWorkflowTests", text)
+        self.assertNotIn("OSL_SMOKE_TOKEN_PROPAGATION", text)
+
+
 if __name__ == "__main__":
     unittest.main()
