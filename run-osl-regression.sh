@@ -280,8 +280,6 @@ ensure_token_propagation_workflow() {
     [[ -n "${KEYCLOAK_BASE_URL:-}" ]] || die "KEYCLOAK_BASE_URL is required for token-propagation smoke"
     log "deploying token-propagation workflow and sample-server"
     demo_dir="$(mktemp -d /tmp/osl-token-demo-XXXXXX)"
-    _osl_token_demo_cleanup() { rm -rf "$demo_dir"; trap - RETURN; }
-    trap _osl_token_demo_cleanup RETURN
     git clone --depth 1 "$DEMO_WORKFLOW_REPO" "$demo_dir" >/dev/null
     git -C "$demo_dir" fetch --depth 1 origin "$DEMO_WORKFLOW_REF" >/dev/null
     git -C "$demo_dir" checkout --detach "$DEMO_WORKFLOW_REF" >/dev/null
@@ -358,6 +356,7 @@ EOF
     oc wait deployment/sample-server -n "$ns" --for=condition=Available --timeout=120s
     oc apply -n "$ns" -f "$manifests_dir"
     patch_smoke_workflow "$ns" token-propagation
+    rm -rf "$demo_dir"
 }
 
 ensure_smoke_workflows() {

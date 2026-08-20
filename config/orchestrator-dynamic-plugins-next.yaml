@@ -5,13 +5,19 @@ plugins:
       dynamicPlugins:
         frontend:
           red-hat-developer-hub.backstage-plugin-orchestrator:
-            pluginModule: Alpha
+            # Orchestrator 6.x colocates NFS at PluginRoot (no Alpha module).
+            # RHDH next still serves packages/app unless APP_CONFIG_app_packageName=app-next.
+            # pluginModule only preloads a scalprum module; dynamicRoutes/appIcons
+            # default to PluginRoot, which does not export OrchestratorPage.
+            pluginModule: Legacy
             appIcons:
               - name: orchestratorIcon
                 importName: OrchestratorIcon
+                module: Legacy
             dynamicRoutes:
               - path: /orchestrator
                 importName: OrchestratorPage
+                module: Legacy
                 menuItem:
                   icon: orchestratorIcon
                   text: Orchestrator

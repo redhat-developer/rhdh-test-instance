@@ -241,11 +241,15 @@ rewrite_osl_refs_in_dir() {
 # ---------------------------------------------------------------------------
 mirror_image() {
     local source_ref="$1" push_ref="$2"
-    local dest_digest src_digest
+    local dest_digest="" src_digest="" dest_json src_json
 
-    dest_digest="$(skopeo inspect --no-tags --tls-verify=false "docker://${push_ref}" 2>/dev/null | jq -r '.Digest // empty')"
+    if dest_json="$(skopeo inspect --no-tags --tls-verify=false "docker://${push_ref}" 2>/dev/null)"; then
+        dest_digest="$(printf '%s' "$dest_json" | jq -r '.Digest // empty')"
+    fi
     if [[ "$dest_digest" == sha256:* ]]; then
-        src_digest="$(skopeo inspect --no-tags --tls-verify=false "docker://${source_ref}" 2>/dev/null | jq -r '.Digest // empty')"
+        if src_json="$(skopeo inspect --no-tags --tls-verify=false "docker://${source_ref}" 2>/dev/null)"; then
+            src_digest="$(printf '%s' "$src_json" | jq -r '.Digest // empty')"
+        fi
         if [[ -n "$src_digest" && "$src_digest" == "$dest_digest" ]]; then
             log "  already present (${dest_digest}), skipping copy"
             return 0
@@ -264,7 +268,7 @@ mirror_image() {
     local attempt=0 max_attempts=3 wait_secs=10
     while (( attempt < max_attempts )); do
         attempt=$((attempt + 1))
-        if skopeo "${skopeo_args[@]}" "docker://${source_ref}" "docker://${push_ref}" >/dev/null 2>&1; then
+        if skopeo "${skopeo_args[@]}" "docker://${source_ref}" "docker://${push_ref}"; then
             return 0
         fi
         if (( attempt < max_attempts )); then

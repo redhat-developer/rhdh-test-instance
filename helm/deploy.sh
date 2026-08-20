@@ -147,6 +147,19 @@ if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     fi
 fi
 
+# New Frontend System (NFS / app-next). Off by default: RHDH next 2.0 still
+# serves packages/app unless these env vars are set, and overlay smoke locators
+# are written for the legacy shell. Set ENABLE_RHDH_NFS=1 to opt in.
+if [[ "${ENABLE_RHDH_NFS:-0}" == "1" ]]; then
+    echo "Enabling RHDH new frontend system (app-next + standard Module Federation)"
+    HELM_ARGS+=(
+        --set-string "upstream.backstage.extraEnvVars[4].name=APP_CONFIG_app_packageName"
+        --set-string "upstream.backstage.extraEnvVars[4].value=app-next"
+        --set-string "upstream.backstage.extraEnvVars[5].name=ENABLE_STANDARD_MODULE_FEDERATION"
+        --set-string "upstream.backstage.extraEnvVars[5].value=true"
+    )
+fi
+
 if [[ "${IS_AUTH_ENABLED:-false}" != "true" ]]; then
     HELM_ARGS+=(
         --set "upstream.backstage.extraAppConfig[1].configMapRef=app-config-guest-auth"
