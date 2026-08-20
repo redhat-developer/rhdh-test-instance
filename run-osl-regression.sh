@@ -30,6 +30,7 @@ WORKFLOW_REPO_REF="${SERVERLESS_WORKFLOWS_REF:-daeeee8dec16beab6d96a81774ef50008
 DEMO_WORKFLOW_REPO="${ORCHESTRATOR_DEMO_REPO:-https://github.com/rhdhorchestrator/orchestrator-demo.git}"
 DEMO_WORKFLOW_REF="${ORCHESTRATOR_DEMO_REF:-c6e59bab65bd584ede5fde7610bbc6187e70206c}"
 SAMPLE_SERVER_IMAGE="${SAMPLE_SERVER_IMAGE:-quay.io/orchestrator/sample-server@sha256:67e694c65bdff0b256590ac32aaad1eeb2045ffbe6923b140d4e022acf8c8993}"
+TOKEN_PROPAGATION_IMAGE="${TOKEN_PROPAGATION_IMAGE:-quay.io/orchestrator/demo-token-propagation@sha256:8b35f7aeafde48deed2700ab9bb247f77d1322d0a3c26005b51aaac782d55302}"
 
 run_all=false
 run_cleanup=false
@@ -58,7 +59,9 @@ Options:
   --rhdh <version>              RHDH version (required with --deploy / --all)
   --osl-release <version>       Load config/osl-releases/<version>.json
   --osl-manifest <path>         Explicit OSL manifest path
-  --namespace <ns>              RHDH/orchestrator namespace (default: orchestrator)
+  --namespace <ns>              RHDH/orchestrator namespace (default: orchestrator).
+                                --test requires orchestrator because overlays
+                                Playwright uses the project name as the k8s ns.
   --overlays-dir <path>         rhdh-plugin-export-overlays checkout
   --allow-relative-service-url  OSL 1.39 Data Index may return a relative
                                 ProcessDefinitions.serviceUrl (SRVLOGIC-1137).
@@ -212,34 +215,11 @@ workflow_osl_image_tag() {
 }
 
 patch_smoke_workflow() {
-    local ns="$1" name="$2" tag="${3:-}" image persistence
-    persistence="{
-      \"spec\": {
-        \"persistence\": {
-          \"dbMigrationStrategy\": \"job\",
-          \"postgresql\": {
-            \"secretRef\": {
-              \"name\": \"backstage-psql-secret\",
-              \"userKey\": \"POSTGRES_USER\",
-              \"passwordKey\": \"POSTGRES_PASSWORD\"
-            },
-            \"serviceRef\": {
-              \"name\": \"backstage-psql\",
-              \"namespace\": \"${ns}\",
-              \"databaseName\": \"backstage_plugin_orchestrator\",
-              \"databaseSchema\": \"${name}\"
-            }
-          }
-        }
-      }
-    }"
+    local ns="$1" name="$2" tag="${3:-}" image
     case "$name" in
         greeting)   image="quay.io/orchestrator/serverless-workflow-greeting:osl_${tag}" ;;
         failswitch) image="quay.io/orchestrator/fail-switch:osl_${tag}" ;;
-        token-propagation)
-            oc -n "$ns" patch sonataflow "$name" --type merge -p "$persistence" >/dev/null
-            return 0
-            ;;
+        token-propagation) image="${TOKEN_PROPAGATION_IMAGE}" ;;
         *) die "unknown smoke workflow: $name" ;;
     esac
     oc -n "$ns" patch sonataflow "$name" --type merge -p "{
@@ -397,8 +377,8 @@ ensure_smoke_workflows() {
     patch_smoke_workflow "$ns" failswitch "$tag"
     ensure_token_propagation_workflow "$ns"
     wait_smoke_workflows_ready "$ns" 600
-    oc rollout restart "deploy/sonataflow-platform-data-index-service" -n "$ns" >/dev/null 2>&1 || true
-    oc rollout status "deploy/sonataflow-platform-data-index-service" -n "$ns" --timeout=180s >/dev/null 2>&1 || true
+    oc rollout restart "deploy/sonataflow-platform-data-index-service" -n "$ns"
+    oc rollout status "deploy/sonataflow-platform-data-index-service" -n "$ns" --timeout=180s
 }
 
 ensure_e2e_deps() {
@@ -486,96 +466,7 @@ phase_prepare() {
 
 ensure_dataindex_rewrite() {
     local ns="$1"
-    local name="osl-di-rewrite"
-    local image rewrite_url oidc_tmp
-    image="$(oc get deploy redhat-developer-hub -n "$ns" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
-    [[ -n "$image" ]] || die "cannot resolve RHDH image for data-index rewrite proxy"
-    rewrite_url="http://${name}.${ns}.svc.cluster.local"
-    log "ensuring data-index rewrite proxy ${name} -> sonataflow-platform-data-index-service"
-    oc create configmap "$name" \
-        --from-file=osl-di-rewrite.js="${SCRIPT_DIR}/utils/orchestrator/osl-di-rewrite.js" \
-        -n "$ns" --dry-run=client -o yaml | oc apply -f - >/dev/null
-    oc apply -f - >/dev/null <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ${name}
-  namespace: ${ns}
-  labels:
-    app: ${name}
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ${name}
-  template:
-    metadata:
-      labels:
-        app: ${name}
-    spec:
-      containers:
-        - name: rewrite
-          image: ${image}
-          command: ["node", "/opt/app-root/src/osl-di-rewrite.js"]
-          env:
-            - name: OSL_DI_UPSTREAM
-              value: http://sonataflow-platform-data-index-service.${ns}.svc.cluster.local
-            - name: PORT
-              value: "8080"
-          ports:
-            - containerPort: 8080
-              name: http
-          readinessProbe:
-            tcpSocket:
-              port: 8080
-            periodSeconds: 5
-          volumeMounts:
-            - name: script
-              mountPath: /opt/app-root/src/osl-di-rewrite.js
-              subPath: osl-di-rewrite.js
-      volumes:
-        - name: script
-          configMap:
-            name: ${name}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${name}
-  namespace: ${ns}
-  labels:
-    app: ${name}
-spec:
-  selector:
-    app: ${name}
-  ports:
-    - name: http
-      port: 80
-      targetPort: 8080
-EOF
-    oc rollout status "deploy/${name}" -n "$ns" --timeout=180s >/dev/null
-    oidc_tmp="$(mktemp)"
-    oc get configmap app-config-oidc -n "$ns" -o jsonpath='{.data.app-config-oidc\.yaml}' > "$oidc_tmp"
-    awk -v url="$rewrite_url" '
-        BEGIN { done = 0 }
-        {
-            if (!done && $0 ~ /^[[:space:]]*url:/) {
-                match($0, /^[[:space:]]*/)
-                print substr($0, 1, RLENGTH) "url: " url
-                done = 1
-                next
-            }
-            print
-        }
-    ' "$oidc_tmp" > "${oidc_tmp}.new"
-    mv "${oidc_tmp}.new" "$oidc_tmp"
-    oc create configmap app-config-oidc \
-        --from-file=app-config-oidc.yaml="$oidc_tmp" \
-        -n "$ns" --dry-run=client -o yaml | oc apply -f - >/dev/null
-    rm -f "$oidc_tmp"
-    oc rollout restart "deploy/redhat-developer-hub" -n "$ns" >/dev/null
-    oc rollout status "deploy/redhat-developer-hub" -n "$ns" --timeout=300s >/dev/null
-    log "data-index rewrite proxy ready (${rewrite_url})"
+    "${SCRIPT_DIR}/utils/orchestrator/ensure-dataindex-rewrite.sh" "$ns"
 }
 
 probe_raw_dataindex() {
@@ -626,6 +517,9 @@ phase_deploy() {
 
 phase_test() {
     log "[test]"
+    if [[ "$namespace" != "orchestrator" ]]; then
+        die "OSL Playwright smoke requires --namespace orchestrator (overlays tests use Playwright project name as the k8s namespace)"
+    fi
     overlays_dir="$(cd "$overlays_dir" && pwd)"
     local e2e smoke_spec="" backup="" rc=0 allow_relative=false
     e2e="$(overlays_e2e_dir)"

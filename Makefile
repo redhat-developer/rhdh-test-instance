@@ -89,7 +89,7 @@ cleanup: ## Clean RHDH/orchestrator/OSL resources and operators from ORCH_NAMESP
 cleanup-full: ## Full cleanup: operators + related namespaces
 	./cleanup.sh --namespace $(ORCH_NAMESPACE) --include-operators --delete-namespace
 
-osl-regression: ## Cleanup + prepare OSL + deploy + 4-test smoke (VERSION, OSL_RELEASE)
+osl-regression: ## Cleanup + prepare OSL + deploy + 4-test smoke (VERSION, OSL_RELEASE; ORCH_NAMESPACE must be orchestrator)
 ifndef OSL_RELEASE
 	$(error OSL_RELEASE is required, e.g. make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1)
 endif

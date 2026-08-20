@@ -90,6 +90,8 @@ test.beforeEach(async ({ page }) => {
   }
 });
 
-const ensureDataIndexOrSkip = createDataIndexGuard();
+const innerDataIndexGuard = createDataIndexGuard();
+const ensureDataIndexOrSkip = (ns: string, testObj: { skip: (condition: boolean, reason: string) => void }) =>
+  innerDataIndexGuard(process.env.NAME_SPACE || ns, testObj);
 registerOrchestratorCoreWorkflowTests(ensureDataIndexOrSkip);
 registerTokenPropagationWorkflowTests(requireEnvVar);

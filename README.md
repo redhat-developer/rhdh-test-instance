@@ -188,9 +188,9 @@ Pin an OSL pre-release against a chosen RHDH version, deploy, and run the defaul
 3. `Rerun Failswitch from failure point`
 4. `Execute token-propagation workflow via API`
 
-Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators (`logic-operator` / `serverless-operator` only), the custom catalog, and the mirror namespace, and cleans the RHDH namespace contents. It does not delete a leftover `rhdh` namespace unless you pass `--delete-namespace` (`make cleanup-full`). Other operators in `openshift-operators` are left in place.
+Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). `--test` requires `--namespace orchestrator` (the default): overlays Playwright uses the project name as the Kubernetes namespace for Data Index and Failswitch retrigger. `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators (`logic-operator` / `serverless-operator` only), the custom catalog, and the mirror namespace, and cleans the RHDH namespace contents. It does not delete a leftover `rhdh` namespace unless you pass `--delete-namespace` (`make cleanup-full`). Other operators in `openshift-operators` are left in place.
 
-Before Playwright, a GraphQL probe hits the **raw** Data Index (`sonataflow-platform-data-index-service`), not the `osl-di-rewrite` proxy. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137). The Orchestrator plugin then cannot `POST` to execute/abort/retrigger. The probe exits 2 on that unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`, which prints a warning and continues so the four tests can still run behind the rewrite proxy. Drop that override after the plugin derives `serviceUrl` from `endpoint`.
+`make setup-orchestrator` (and the driver's `--deploy` phase) installs `osl-di-rewrite` in front of Data Index so OSL 1.39 relative `serviceUrl` values still work from RHDH. The GraphQL probe before Playwright still hits the **raw** Data Index (`sonataflow-platform-data-index-service`), not that proxy. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137). The Orchestrator plugin then cannot `POST` to execute/abort/retrigger. The probe exits 2 on that unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`, which prints a warning and continues so the four tests can still run behind the rewrite proxy. Drop that override after the plugin derives `serviceUrl` from `endpoint`.
 
 ```bash
 # One-shot: full cleanup (including operators) -> mirror OSL -> deploy -> smoke
@@ -413,6 +413,7 @@ rhdh-test-instance/
 │   ├── app-config-rhdh.yaml                # Main RHDH configuration (guest auth by default)
 │   ├── dynamic-plugins.yaml                # Base dynamic plugins configuration
 │   ├── orchestrator-dynamic-plugins.yaml   # Orchestrator plugins (merged when ORCH=true)
+│   ├── osl-releases/                       # Local OSL pre-release JSON (gitignored except example)
 │   ├── rbac-policies.yaml                  # RBAC policy ConfigMap
 │   └── rhdh-secrets.yaml                   # Reference template for rhdh-secrets Secret
 ├── helm/
@@ -439,7 +440,14 @@ rhdh-test-instance/
 │   └── plugins/
 │       ├── config-keycloak-plugin.sh       # Keycloak deploy, realm/client/user setup
 │       └── config-lighthouse-plugin.sh     # Lighthouse deploy and URL injection
+├── utils/
+│   ├── keycloak/                           # Shared Keycloak deploy used by setup-orchestrator
+│   └── orchestrator/                       # Data Index rewrite proxy and existing-RHDH checks
+├── cleanup.sh                              # Orchestrator/OSL teardown (operators optional)
 ├── deploy.sh                               # Main deploy entry point
+├── prepare-osl-internal.sh                 # Mirror pre-release OSL into the internal registry
+├── run-osl-regression.sh                   # OSL RC smoke driver (cleanup → prepare → deploy → test)
+├── setup-orchestrator.sh                   # RHDH + orchestrator + Keycloak + rewrite proxy
 ├── teardown.sh                             # Main teardown entry point
 ├── Makefile                                # Make targets
 ├── OWNERS                                  # Project maintainers

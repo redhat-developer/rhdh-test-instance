@@ -241,10 +241,16 @@ rewrite_osl_refs_in_dir() {
 # ---------------------------------------------------------------------------
 mirror_image() {
     local source_ref="$1" push_ref="$2"
+    local dest_digest src_digest
 
-    if skopeo inspect --no-tags --tls-verify=false "docker://${push_ref}" >/dev/null 2>&1; then
-        log "  already present, skipping copy"
-        return 0
+    dest_digest="$(skopeo inspect --no-tags --tls-verify=false "docker://${push_ref}" 2>/dev/null | jq -r '.Digest // empty')"
+    if [[ "$dest_digest" == sha256:* ]]; then
+        src_digest="$(skopeo inspect --no-tags --tls-verify=false "docker://${source_ref}" 2>/dev/null | jq -r '.Digest // empty')"
+        if [[ -n "$src_digest" && "$src_digest" == "$dest_digest" ]]; then
+            log "  already present (${dest_digest}), skipping copy"
+            return 0
+        fi
+        log "  dest digest ${dest_digest} differs from source ${src_digest:-unknown}; recopying"
     fi
 
     local skopeo_args=(copy --preserve-digests --retry-times "$SKOPEO_RETRY_TIMES"
@@ -328,7 +334,7 @@ build_rewritten_logic_catalog() {
     rewrite_osl_refs_in_dir "${workdir}/configs" "$BUNDLE_DIGEST_PIN"
 
     cat > "${workdir}/Dockerfile" <<'EOF'
-FROM quay.io/operator-framework/opm:latest
+FROM quay.io/operator-framework/opm@sha256:3bbabf4be41d2d071ce5dd2fe35040139848331c95dfb23ff06f5ba47fd13203
 COPY configs /configs
 ENTRYPOINT ["/bin/opm"]
 CMD ["serve", "/configs", "--cache-dir=/tmp/cache", "--cache-enforce-integrity=false"]

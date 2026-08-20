@@ -261,7 +261,8 @@ update_rhdh_client_redirects() {
   [ -z "$client_uuid" ] && echo "Error: rhdh-client UUID not found" && return 1
 
   payload=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$client_uuid" "" "Get rhdh-client representation" | \
-    jq -c --arg uri "$redirect" '.redirectUris = [$uri] | .webOrigins = [$uri] | .implicitFlowEnabled = false')
+    jq -c --arg uri "$redirect" --arg origin "${rhdh_url%/}" \
+      '.redirectUris = [$uri] | .webOrigins = [$origin] | .implicitFlowEnabled = false')
   api_call PUT "$KEYCLOAK_URL/admin/realms/rhdh/clients/$client_uuid" "$payload" "Pin rhdh-client redirects" >/dev/null
-  echo "Pinned rhdh-client redirectUris/webOrigins to ${redirect}"
+  echo "Pinned rhdh-client redirectUris to ${redirect} webOrigins to ${rhdh_url%/}"
 }

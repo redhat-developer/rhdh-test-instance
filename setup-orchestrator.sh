@@ -2,7 +2,8 @@
 #
 # One-command setup of RHDH + orchestrator for overlays e2e.
 # Deploys Keycloak, installs orchestrator prerequisites, deploys RHDH via Helm,
-# and verifies the shared existing-RHDH substrate contract.
+# installs osl-di-rewrite in front of Data Index, and verifies the shared
+# existing-RHDH substrate contract.
 #
 # Usage:
 #   ./setup-orchestrator.sh <version> [--namespace <ns>] [--prepare-internal-osl <release>]
@@ -373,20 +374,35 @@ if [[ -f "${SCRIPT_DIR}/.env.osl" ]]; then
 fi
 assert_empty_baseline "$namespace" "$KEYCLOAK_NAMESPACE"
 
+route_scheme() {
+    local name="$1" ns="$2"
+    if oc get route "$name" -n "$ns" -o jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
+        echo https
+    else
+        echo http
+    fi
+}
+
+rhdh_public_url() {
+    local ns="$1"
+    local host scheme
+    host="$(oc get route redhat-developer-hub -n "$ns" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
+    [[ -n "$host" ]] || return 1
+    scheme="$(route_scheme redhat-developer-hub "$ns")"
+    echo "${scheme}://${host}"
+}
+
 wait_for_rhdh_auth_and_orchestrator_ready() {
     local ns="$1"
     local timeout_secs="${2:-240}"
-    local start_time
+    local start_time rhdh_url
     start_time=$(date +%s)
-
-    local rhdh_host
-    rhdh_host="$(oc get route redhat-developer-hub -n "$ns" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-    if [[ -z "$rhdh_host" ]]; then
+    rhdh_url="$(rhdh_public_url "$ns")" || {
         echo "Error: Could not resolve RHDH route in namespace '$ns'."
         return 1
-    fi
+    }
 
-    log "Waiting for RHDH auth/backend HTTP readiness..."
+    log "Waiting for RHDH auth/backend HTTP readiness at ${rhdh_url}..."
     while true; do
         local elapsed auth_status auth_location app_health orch_health
         elapsed=$(( $(date +%s) - start_time ))
@@ -399,13 +415,13 @@ wait_for_rhdh_auth_and_orchestrator_ready() {
             return 1
         fi
 
-        auth_status=$(curl -sk -o /dev/null -w '%{http_code}' "https://${rhdh_host}/api/auth/oidc/start?env=production" || true)
-        auth_location=$(curl -sk -D - -o /dev/null "https://${rhdh_host}/api/auth/oidc/start?env=production" | \
+        auth_status=$(curl -sk -o /dev/null -w '%{http_code}' "${rhdh_url}/api/auth/oidc/start?env=production" || true)
+        auth_location=$(curl -sk -D - -o /dev/null "${rhdh_url}/api/auth/oidc/start?env=production" | \
             awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2; exit}' | tr -d '\r')
-        app_health=$(curl -sk -o /dev/null -w '%{http_code}' "https://${rhdh_host}/api/app/health" || true)
-        orch_health=$(curl -sk -o /dev/null -w '%{http_code}' "https://${rhdh_host}/api/orchestrator/health" || true)
+        app_health=$(curl -sk -o /dev/null -w '%{http_code}' "${rhdh_url}/api/app/health" || true)
+        orch_health=$(curl -sk -o /dev/null -w '%{http_code}' "${rhdh_url}/api/orchestrator/health" || true)
 
-        if [[ "$app_health" == "200" && "$auth_status" == "302" && "$auth_location" =~ ^https:// && "$orch_health" == "200" ]]; then
+        if [[ "$app_health" == "200" && "$auth_status" == "302" && "$auth_location" =~ ^https?:// && "$orch_health" == "200" ]]; then
             log "RHDH auth/backend/orchestrator readiness checks passed."
             return 0
         fi
@@ -457,9 +473,13 @@ run_post_setup_workflow_smoke() {
     oc exec -n "$ns" deploy/sonataflow-platform-data-index-service -- \
         curl -sf --max-time 5 "http://localhost:8080/q/health/ready" >/dev/null
 
-    local orchestrator_host orch_health
-    orchestrator_host="$(oc get route redhat-developer-hub -n "$ns" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-    orch_health="$(curl -sk -o /dev/null -w '%{http_code}' "https://${orchestrator_host}/api/orchestrator/health" || true)"
+    local orchestrator_url orch_health
+    orchestrator_url="$(rhdh_public_url "$ns")" || {
+        echo "Error: Could not resolve RHDH route for post-setup smoke."
+        rm -rf "$workflow_dir"
+        exit 1
+    }
+    orch_health="$(curl -sk -o /dev/null -w '%{http_code}' "${orchestrator_url}/api/orchestrator/health" || true)"
     if [[ "$orch_health" != "200" ]]; then
         echo "Error: Post-smoke orchestrator health check failed (HTTP ${orch_health})."
         rm -rf "$workflow_dir"
@@ -517,12 +537,11 @@ SKIP_ORCHESTRATOR_INFRA_INSTALL=1 \
 ./deploy.sh helm "$version" --namespace "$namespace" --with-orchestrator
 phase_checkpoint "rhdh-deployed"
 
-rhdh_host="$(oc get route redhat-developer-hub -n "$namespace" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-if [[ -z "$rhdh_host" ]]; then
+RHDH_BASE_URL="$(rhdh_public_url "$namespace")" || {
     echo "Error: Could not resolve RHDH route after deploy."
     exit 1
-fi
-export RHDH_BASE_URL="https://${rhdh_host}"
+}
+export RHDH_BASE_URL
 if declare -F update_rhdh_client_redirects >/dev/null; then
     update_rhdh_client_redirects "$RHDH_BASE_URL"
 fi
@@ -540,12 +559,14 @@ oc rollout status deployment/redhat-developer-hub -n "$namespace" --timeout=600s
     emit_diag_hints "$namespace"
 }
 wait_for_rhdh_auth_and_orchestrator_ready "$namespace"
+log "Installing osl-di-rewrite in front of Data Index (SRVLOGIC-1137 relative serviceUrl)"
+"${SCRIPT_DIR}/utils/orchestrator/ensure-dataindex-rewrite.sh" "$namespace"
+wait_for_rhdh_auth_and_orchestrator_ready "$namespace"
 run_post_setup_workflow_smoke "$namespace"
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 
-rhdh_host="$(oc get route redhat-developer-hub -n "$namespace" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-RHDH_URL="${RHDH_BASE_URL:-${rhdh_host:+https://${rhdh_host}}}"
+RHDH_URL="${RHDH_BASE_URL}"
 KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-}"
 
 echo ""
