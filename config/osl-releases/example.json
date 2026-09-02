@@ -8,7 +8,7 @@
   },
   "images": [
     {
-      "_comment": "Each entry is a container image referenced by the operator bundle. source is the digest ref from the release email, name is a short identifier used as the internal registry repo name.",
+      "_comment": "Each entry is a container image referenced by the operator bundle. source is the digest ref from the release email. name is a short label for logs and bundle detection; the internal registry repo name is derived from source.",
       "source": "registry-proxy.engineering.redhat.com/rh-osbs/openshift-serverless-1-logic-rhel9-operator@sha256:abcdef...",
       "name": "logic-rhel9-operator"
     },

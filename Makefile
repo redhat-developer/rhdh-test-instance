@@ -83,10 +83,10 @@ endif
 setup-orchestrator: ## Full RHDH + orchestrator setup (VERSION, ORCH_NAMESPACE, OSL_RELEASE)
 	./setup-orchestrator.sh $(VERSION) --namespace $(ORCH_NAMESPACE) $(if $(filter-out ,$(OSL_RELEASE)),--prepare-internal-osl $(OSL_RELEASE))
 
-cleanup: ## Clean RHDH/orchestrator/OSL resources and operators from ORCH_NAMESPACE
+cleanup: ## Empty ORCH_NAMESPACE; remove OSL/Serverless operators, knative, osl-mirror, leftover orchestrator ns. Does not delete ORCH_NAMESPACE.
 	./cleanup.sh --namespace $(ORCH_NAMESPACE) --include-operators
 
-cleanup-full: ## Full cleanup: operators + related namespaces
+cleanup-full: ## Same as cleanup, then delete ORCH_NAMESPACE
 	./cleanup.sh --namespace $(ORCH_NAMESPACE) --include-operators --delete-namespace
 
 osl-regression: ## Cleanup + prepare OSL + deploy + 4-test smoke (VERSION, OSL_RELEASE; ORCH_NAMESPACE must match overlays Playwright project, default orchestrator-app-next)

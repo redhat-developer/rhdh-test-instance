@@ -328,8 +328,7 @@ assert_pre_release_install_state() {
 }
 
 prepare_keycloak() {
-    # shellcheck disable=SC1091
-    source "$SCRIPT_DIR/utils/keycloak/keycloak-deploy.sh" "$KEYCLOAK_NAMESPACE"
+    bash "$SCRIPT_DIR/utils/keycloak/keycloak-deploy.sh" "$KEYCLOAK_NAMESPACE"
 }
 
 sync_keycloak_runtime_env() {
@@ -438,55 +437,23 @@ run_post_setup_workflow_smoke() {
         return 0
     fi
 
-    local workflow_repo="${SERVERLESS_WORKFLOWS_REPO:-https://github.com/rhdhorchestrator/serverless-workflows.git}"
-    local workflow_ref="${SERVERLESS_WORKFLOWS_REF:-daeeee8dec16beab6d96a81774ef500081a2c2b0}"
-    local workflow_dir="/tmp/serverless-workflows-${RANDOM}-${RANDOM}"
-    local greeting_manifest_dir="${workflow_dir}/workflows/greeting/manifests"
-
     log "Running post-setup workflow smoke in namespace ${ns}..."
-    git clone --depth=1 "$workflow_repo" "$workflow_dir" >/dev/null 2>&1
-    git -C "$workflow_dir" fetch --depth=1 origin "$workflow_ref" >/dev/null 2>&1
-    git -C "$workflow_dir" checkout --detach "$workflow_ref" >/dev/null 2>&1
+    bash "$SCRIPT_DIR/utils/orchestrator/deploy-smoke-workflows.sh" "$ns" greeting
 
-    oc apply -n "$ns" -f "$greeting_manifest_dir" >/dev/null
-    oc patch sonataflow greeting -n "$ns" --type merge -p '{
-      "spec": {
-        "persistence": {
-          "postgresql": {
-            "secretRef": {
-              "name": "backstage-psql-secret",
-              "userKey": "POSTGRES_USER",
-              "passwordKey": "POSTGRES_PASSWORD"
-            },
-            "serviceRef": {
-              "name": "backstage-psql",
-              "namespace": "'"$ns"'",
-              "databaseName": "backstage_plugin_orchestrator"
-            }
-          }
-        }
-      }
-    }' >/dev/null
-
-    oc rollout restart deployment/greeting -n "$ns" >/dev/null 2>&1 || true
-    oc rollout status deployment/greeting -n "$ns" --timeout=600s >/dev/null
     oc exec -n "$ns" deploy/sonataflow-platform-data-index-service -- \
         curl -sf --max-time 5 "http://localhost:8080/q/health/ready" >/dev/null
 
     local orchestrator_url orch_health
     orchestrator_url="$(rhdh_public_url "$ns")" || {
         echo "Error: Could not resolve RHDH route for post-setup smoke."
-        rm -rf "$workflow_dir"
         exit 1
     }
     orch_health="$(curl -sk -o /dev/null -w '%{http_code}' "${orchestrator_url}/api/orchestrator/health" || true)"
     if [[ "$orch_health" != "200" ]]; then
         echo "Error: Post-smoke orchestrator health check failed (HTTP ${orch_health})."
-        rm -rf "$workflow_dir"
         exit 1
     fi
 
-    rm -rf "$workflow_dir"
     phase_checkpoint "post-setup-workflow-smoke-passed"
 }
 
@@ -542,9 +509,7 @@ RHDH_BASE_URL="$(rhdh_public_url "$namespace")" || {
     exit 1
 }
 export RHDH_BASE_URL
-if declare -F update_rhdh_client_redirects >/dev/null; then
-    update_rhdh_client_redirects "$RHDH_BASE_URL"
-fi
+bash "$SCRIPT_DIR/utils/keycloak/update-rhdh-client-redirects.sh" "$KEYCLOAK_NAMESPACE" "$RHDH_BASE_URL"
 
 # ── Verify overlays existing-RHDH contract ───────────────────────────────────
 

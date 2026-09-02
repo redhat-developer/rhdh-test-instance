@@ -27,12 +27,6 @@ SMOKE_WRAPPER_NAME="osl-regression-smoke.spec.ts"
 SMOKE_GREP='Run Greeting workflow and verify Workflows tab|Run Failswitch workflow and verify statuses|Rerun Failswitch from failure point|Execute token-propagation workflow via API'
 # Overlays NFS lane (upstream): Playwright project name == k8s namespace.
 DEFAULT_NAMESPACE="orchestrator-app-next"
-WORKFLOW_REPO="${SERVERLESS_WORKFLOWS_REPO:-https://github.com/rhdhorchestrator/serverless-workflows.git}"
-WORKFLOW_REPO_REF="${SERVERLESS_WORKFLOWS_REF:-daeeee8dec16beab6d96a81774ef500081a2c2b0}"
-DEMO_WORKFLOW_REPO="${ORCHESTRATOR_DEMO_REPO:-https://github.com/rhdhorchestrator/orchestrator-demo.git}"
-DEMO_WORKFLOW_REF="${ORCHESTRATOR_DEMO_REF:-c6e59bab65bd584ede5fde7610bbc6187e70206c}"
-SAMPLE_SERVER_IMAGE="${SAMPLE_SERVER_IMAGE:-quay.io/orchestrator/sample-server@sha256:67e694c65bdff0b256590ac32aaad1eeb2045ffbe6923b140d4e022acf8c8993}"
-TOKEN_PROPAGATION_IMAGE="${TOKEN_PROPAGATION_IMAGE:-quay.io/orchestrator/demo-token-propagation@sha256:8b35f7aeafde48deed2700ab9bb247f77d1322d0a3c26005b51aaac782d55302}"
 
 run_all=false
 run_cleanup=false
@@ -65,14 +59,11 @@ Options:
                                 --test requires the namespace to match the overlays
                                 Playwright project (NFS: orchestrator-app-next).
   --overlays-dir <path>         rhdh-plugin-export-overlays checkout (NFS lane)
-  --allow-relative-service-url  OSL 1.39 Data Index may return a relative
-                                ProcessDefinitions.serviceUrl (SRVLOGIC-1137).
-                                The GraphQL probe fails on that by default.
-                                This flag (or ALLOW_RELATIVE_SERVICE_URL=1)
-                                warns and continues so Playwright can run
-                                behind the osl-di-rewrite proxy. Drop this
-                                after the Orchestrator plugin derives
-                                serviceUrl from endpoint.
+  --allow-relative-service-url  Continue if the osl-di-rewrite GraphQL probe
+                                still sees a relative ProcessDefinitions.serviceUrl
+                                (SRVLOGIC-1137). Default probe hits the rewrite
+                                proxy, not raw Data Index. Also:
+                                ALLOW_RELATIVE_SERVICE_URL=1
   -h, --help                    Show this help
 EOF
 }
@@ -201,200 +192,6 @@ route_url() {
     echo "${scheme}://${host}"
 }
 
-csv_mm_for_package() {
-    local package="$1"
-    local version
-    version="$(oc get csv -n openshift-operators -o json 2>/dev/null | jq -r --arg p "$package" '
-        .items[]
-        | select(.status.phase == "Succeeded")
-        | select((.spec.name == $p) or ((.metadata.name // "") | startswith($p + ".")))
-        | .spec.version // empty
-    ' | head -n 1)"
-    echo "$version" | grep -oE '^[0-9]+\.[0-9]+' || true
-}
-
-workflow_osl_image_tag() {
-    local os_mm osl_mm chosen
-    os_mm="$(csv_mm_for_package serverless-operator)"
-    osl_mm="$(csv_mm_for_package logic-operator)"
-    if [[ -n "$os_mm" && -n "$osl_mm" ]]; then
-        if [[ "$(printf '%s\n%s\n' "$os_mm" "$osl_mm" | sort -V | head -n 1)" == "$os_mm" ]]; then
-            chosen="$os_mm"
-        else
-            chosen="$osl_mm"
-        fi
-    else
-        chosen="${os_mm:-${osl_mm:-1.37}}"
-    fi
-    echo "${chosen//./_}"
-}
-
-patch_smoke_workflow() {
-    local ns="$1" name="$2" tag="${3:-}" image
-    case "$name" in
-        greeting)   image="quay.io/orchestrator/serverless-workflow-greeting:osl_${tag}" ;;
-        failswitch) image="quay.io/orchestrator/fail-switch:osl_${tag}" ;;
-        token-propagation) image="${TOKEN_PROPAGATION_IMAGE}" ;;
-        *) die "unknown smoke workflow: $name" ;;
-    esac
-    oc -n "$ns" patch sonataflow "$name" --type merge -p "{
-      \"spec\": {
-        \"persistence\": {
-          \"dbMigrationStrategy\": \"job\",
-          \"postgresql\": {
-            \"secretRef\": {
-              \"name\": \"backstage-psql-secret\",
-              \"userKey\": \"POSTGRES_USER\",
-              \"passwordKey\": \"POSTGRES_PASSWORD\"
-            },
-            \"serviceRef\": {
-              \"name\": \"backstage-psql\",
-              \"namespace\": \"${ns}\",
-              \"databaseName\": \"backstage_plugin_orchestrator\",
-              \"databaseSchema\": \"${name}\"
-            }
-          }
-        },
-        \"podTemplate\": {
-          \"container\": {
-            \"image\": \"${image}\",
-            \"env\": [{\"name\": \"KOGITO_SERVICE_URL\", \"value\": \"http://${name}.${ns}.svc.cluster.local\"}]
-          }
-        }
-      }
-    }" >/dev/null
-}
-
-wait_smoke_workflows_ready() {
-    local ns="$1" timeout_secs="${2:-600}" start elapsed ready
-    start="$(date +%s)"
-    while true; do
-        ready=true
-        for name in greeting failswitch token-propagation; do
-            local replicas
-            replicas="$(oc get deployment "$name" -n "$ns" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
-            if [[ "$replicas" != "1" ]]; then
-                ready=false
-            fi
-        done
-        if [[ "$ready" == "true" ]]; then
-            log "smoke workflows greeting/failswitch/token-propagation are ready"
-            return 0
-        fi
-        elapsed=$(( $(date +%s) - start ))
-        if (( elapsed >= timeout_secs )); then
-            die "timeout waiting for greeting/failswitch/token-propagation deployments in $ns"
-        fi
-        sleep 10
-    done
-}
-
-ensure_token_propagation_workflow() {
-    local ns="$1"
-    local demo_dir manifests_dir props_cm specs_cm
-    [[ -n "${KEYCLOAK_BASE_URL:-}" ]] || die "KEYCLOAK_BASE_URL is required for token-propagation smoke"
-    log "deploying token-propagation workflow and sample-server"
-    demo_dir="$(mktemp -d /tmp/osl-token-demo-XXXXXX)"
-    git clone --depth 1 "$DEMO_WORKFLOW_REPO" "$demo_dir" >/dev/null
-    git -C "$demo_dir" fetch --depth 1 origin "$DEMO_WORKFLOW_REF" >/dev/null
-    git -C "$demo_dir" checkout --detach "$DEMO_WORKFLOW_REF" >/dev/null
-    manifests_dir="${demo_dir}/09_token_propagation/manifests"
-    props_cm="${manifests_dir}/01-configmap_token-propagation-props.yaml"
-    specs_cm="${manifests_dir}/03-configmap_02-token-propagation-resources-specs.yaml"
-    [[ -f "$props_cm" && -f "$specs_cm" ]] || die "token-propagation manifests missing in $DEMO_WORKFLOW_REPO"
-    local kc_base realm client_id client_secret auth_server_url token_url sample_url
-    kc_base="${KEYCLOAK_BASE_URL%/}"
-    realm="${KEYCLOAK_REALM:-rhdh}"
-    client_id="${KEYCLOAK_CLIENT_ID:-rhdh-client}"
-    client_secret="${KEYCLOAK_CLIENT_SECRET:-rhdh-client-secret}"
-    auth_server_url="${kc_base}/realms/${realm}"
-    token_url="${auth_server_url}/protocol/openid-connect/token"
-    sample_url="http://sample-server-service.${ns}:8080"
-    sed -i \
-        -e "s|http://example-kc-service.keycloak:8080/realms/quarkus|${auth_server_url}|g" \
-        -e "s|client-id=quarkus-app|client-id=${client_id}|g" \
-        -e "s|client-secret=lVGSvdaoDUem7lqeAnqXn1F92dCPbQea|client-secret=${client_secret}|g" \
-        -e "s|http://sample-server-service.rhdh-operator|${sample_url}|g" \
-        "$props_cm"
-    sed -i \
-        -e "s|http://example-kc-service.keycloak:8080/realms/quarkus/protocol/openid-connect/token|${token_url}|g" \
-        "$specs_cm"
-    oc apply -n "$ns" -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: sample-server
-  labels:
-    app: sample-server
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: sample-server
-  template:
-    metadata:
-      labels:
-        app: sample-server
-    spec:
-      containers:
-        - name: sample-server
-          image: ${SAMPLE_SERVER_IMAGE}
-          ports:
-            - containerPort: 8080
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 15
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: sample-server-service
-  labels:
-    app: sample-server
-spec:
-  selector:
-    app: sample-server
-  ports:
-    - port: 8080
-      targetPort: 8080
-      protocol: TCP
-EOF
-    oc wait deployment/sample-server -n "$ns" --for=condition=Available --timeout=120s
-    oc apply -n "$ns" -f "$manifests_dir"
-    patch_smoke_workflow "$ns" token-propagation
-    rm -rf "$demo_dir"
-}
-
-ensure_smoke_workflows() {
-    local ns="$1"
-    local tag
-    tag="$(workflow_osl_image_tag)"
-    log "deploying smoke workflows (image tag osl_${tag})"
-    local workflow_dir
-    workflow_dir="$(mktemp -d /tmp/osl-workflows-XXXXXX)"
-    git clone --depth 1 "$WORKFLOW_REPO" "$workflow_dir" >/dev/null
-    git -C "$workflow_dir" fetch --depth 1 origin "$WORKFLOW_REPO_REF" >/dev/null
-    git -C "$workflow_dir" checkout --detach "$WORKFLOW_REPO_REF" >/dev/null
-    oc apply -n "$ns" -f "${workflow_dir}/workflows/greeting/manifests"
-    oc apply -n "$ns" -f "${workflow_dir}/workflows/fail-switch/src/main/resources/manifests"
-    rm -rf "$workflow_dir"
-    patch_smoke_workflow "$ns" greeting "$tag"
-    patch_smoke_workflow "$ns" failswitch "$tag"
-    ensure_token_propagation_workflow "$ns"
-    wait_smoke_workflows_ready "$ns" 600
-    oc rollout restart "deploy/sonataflow-platform-data-index-service" -n "$ns"
-    oc rollout status "deploy/sonataflow-platform-data-index-service" -n "$ns" --timeout=180s
-}
-
 ensure_e2e_deps() {
     local e2e="$1"
     if [[ -d "${e2e}/node_modules" ]]; then
@@ -483,15 +280,15 @@ ensure_dataindex_rewrite() {
     "${SCRIPT_DIR}/utils/orchestrator/ensure-dataindex-rewrite.sh" "$ns"
 }
 
-probe_raw_dataindex() {
+probe_dataindex() {
     local ns="$1" allow="$2"
     local body url json count problems
     body='{"query":"{ ProcessDefinitions { id serviceUrl endpoint } }"}'
-    url="http://sonataflow-platform-data-index-service.${ns}.svc.cluster.local/graphql"
-    log "probing raw Data Index GraphQL ProcessDefinitions.serviceUrl"
+    url="http://osl-di-rewrite.${ns}.svc.cluster.local/graphql"
+    log "probing Data Index GraphQL via osl-di-rewrite ProcessDefinitions.serviceUrl"
     json="$(oc exec -n "$ns" deploy/redhat-developer-hub -- \
         curl -sS -X POST -H "Content-Type: application/json" -d "$body" "$url")" \
-        || die "oc exec curl of Data Index GraphQL failed"
+        || die "oc exec curl of Data Index GraphQL (osl-di-rewrite) failed"
     if ! printf '%s' "$json" | jq -e . >/dev/null 2>&1; then
         die "Data Index did not return JSON: ${json:0:500}"
     fi
@@ -566,11 +363,11 @@ phase_test() {
     }
     trap cleanup_test_artifacts EXIT
 
-    ensure_smoke_workflows "$namespace"
+    bash "${SCRIPT_DIR}/utils/orchestrator/deploy-smoke-workflows.sh" "$namespace"
     if [[ "$allow_relative_service_url" == "true" || "${ALLOW_RELATIVE_SERVICE_URL:-}" == "1" ]]; then
         allow_relative=true
     fi
-    probe_raw_dataindex "$namespace" "$allow_relative"
+    probe_dataindex "$namespace" "$allow_relative"
     smoke_spec="${e2e}/tests/${SMOKE_WRAPPER_NAME}"
     cp -a "$SMOKE_WRAPPER_SRC" "$smoke_spec"
 

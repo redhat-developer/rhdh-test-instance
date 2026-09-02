@@ -190,19 +190,17 @@ Pin an OSL pre-release against a chosen RHDH version, deploy, and run the defaul
 
 Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). Overlays orchestrator e2e is **NFS-only** (`orchestrator-app-next`): `--test` requires `--namespace` to match that Playwright project (default `orchestrator-app-next`). Deploying `next` / `*-CI` always enables the app-next shell (`APP_CONFIG_app_packageName=app-next` + `ENABLE_STANDARD_MODULE_FEDERATION` on `rhdh-secrets`). Point `--overlays-dir` at an overlays checkout that includes the NFS lane. `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators (`logic-operator` / `serverless-operator` only), the custom catalog, and the mirror namespace, and cleans the RHDH namespace contents. It does not delete a leftover `rhdh` namespace unless you pass `--delete-namespace` (`make cleanup-full`). Other operators in `openshift-operators` are left in place.
 
-`make setup-orchestrator` (and the driver's `--deploy` phase) installs `osl-di-rewrite` in front of Data Index so OSL 1.39 relative `serviceUrl` values still work from RHDH. The GraphQL probe before Playwright still hits the **raw** Data Index (`sonataflow-platform-data-index-service`), not that proxy. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137). The Orchestrator plugin then cannot `POST` to execute/abort/retrigger. The probe exits 2 on that unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`, which prints a warning and continues so the four tests can still run behind the rewrite proxy. Drop that override after the plugin derives `serviceUrl` from `endpoint`.
+`make setup-orchestrator` (and the driver's `--deploy` phase) installs `osl-di-rewrite` in front of Data Index so OSL 1.39 relative `serviceUrl` values still work from RHDH. The GraphQL probe before Playwright hits that rewrite proxy (`osl-di-rewrite`), not raw Data Index. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137); the rewrite fills `serviceUrl` from `endpoint`. If the probe still sees a relative URL, it exits 2 unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`. Drop that override after the Orchestrator plugin derives `serviceUrl` from `endpoint`.
 
 ```bash
 # One-shot: full cleanup (including operators) -> mirror OSL -> deploy -> smoke
 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator-app-next
-# 1.39.CR1 currently needs the relative-serviceUrl override:
-ALLOW_RELATIVE_SERVICE_URL=1 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1
 
 # Or call the driver directly
 ./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1
 ./run-osl-regression.sh --cleanup --namespace orchestrator-app-next
 ./run-osl-regression.sh --cleanup --prepare-osl --deploy --rhdh next --osl-release 1.39.0.CR1
-ALLOW_RELATIVE_SERVICE_URL=1 ./run-osl-regression.sh --test --rhdh next
+./run-osl-regression.sh --test --rhdh next
 ./run-osl-regression.sh --test --rhdh next --overlays-dir ../rhdh-plugin-export-overlays
 ```
 
@@ -239,7 +237,7 @@ All make commands accept these variables:
 | `RUNNER_IMAGE`      | `quay.io/rhdh-community/rhdh-e2e-runner:main` | Container image for `install-operator`                                    |
 | `OSL_RELEASE`       | _(empty)_                                     | OSL pre-release id for `prepare-osl` / `osl-regression`                   |
 | `ORCH_NAMESPACE`    | `orchestrator-app-next`                       | Namespace used by orchestrator/OSL setup and cleanup (NFS Playwright project) |
-| `ALLOW_RELATIVE_SERVICE_URL` | _(unset)_                          | Set to `1` to continue smoke after a relative Data Index `serviceUrl`     |
+| `ALLOW_RELATIVE_SERVICE_URL` | _(unset)_                          | Set to `1` to continue smoke if the rewrite probe still sees a relative `serviceUrl` |
 
 > **Note:** `install-operator` requires you to be logged into the cluster via `oc login` on your host.
 > It automatically passes the session token to the e2e-runner container (needs Linux tools like `umoci`, `opm`, `skopeo`).

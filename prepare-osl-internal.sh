@@ -19,9 +19,6 @@
 #   setup-orchestrator.sh sources .env.osl and translates these into
 #   --logic-operator-* flags for install-orchestrator.sh, which uses
 #   LOGIC_OPERATOR_SOURCE, LOGIC_OPERATOR_STARTING_CSV, etc.
-#
-#   The overlays e2e tests (workflow-deployment-helpers.ts) read
-#   ORCH_E2E_LOGIC_OPERATOR_* env vars that map 1:1 to the same flags.
 
 set -euo pipefail
 
@@ -450,7 +447,7 @@ log "OCP:        ${ocp_minor}"
 log "IIB:        ${iib_source}"
 log "Images:     ${#image_sources[@]}"
 log "Arch:       $(if [[ "$multi_arch" == "true" ]]; then echo "multi"; else echo "amd64"; fi)"
-log "Mode:       rewrite-catalog (default)"
+log "Mode:       rewrite-catalog"
 
 if [[ "$iib_source" != *@sha256:* ]]; then
     if [[ "$ENFORCE_DIGEST_PINNING" == "1" ]]; then
@@ -503,9 +500,8 @@ mirror_image "$iib_source" "${registry_host}/${mirror_namespace}/${iib_repo_name
 rewrite_operator_bundle_csv "$registry_host"
 
 # ---------------------------------------------------------------------------
-# Hosted-compatible rewrite catalog path (default)
+# Hosted-compatible rewrite catalog
 # ---------------------------------------------------------------------------
-OSL_IIB_IMAGE="${INTERNAL_REGISTRY_SERVICE}/${mirror_namespace}/${iib_repo_name}:mirror"
 build_rewritten_logic_catalog "${registry_host}" "${registry_host}/${mirror_namespace}/${iib_repo_name}:mirror"
 
 # ---------------------------------------------------------------------------

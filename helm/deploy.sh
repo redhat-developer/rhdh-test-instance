@@ -66,18 +66,13 @@ if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     merge_orch=false
     if [[ "$version" == "next" || "$version" == *-CI ]]; then
         orch_file="config/orchestrator-dynamic-plugins-next.yaml"
-        # Always ensure NFS next plugins (OIDC re-enable + orchestrator) are
-        # present. Full deploy.sh resets the ConfigMap from
-        # config/dynamic-plugins.yaml; also catch Legacy leftovers if this
-        # script is re-run alone.
-        if [[ "$current_dp" == *pluginModule:\ Legacy* ]] || [[ "$current_dp" == *OrchestratorPage* ]]; then
-            echo "Replacing Legacy orchestrator plugin wiring with NFS next config..."
+        # Full deploy.sh reseeds this ConfigMap from config/dynamic-plugins.yaml.
+        # On a helm-only re-run, reset to that base when the NFS oidc pin is missing.
+        if [[ "$current_dp" != *auth-backend-module-oidc-provider* ]]; then
             oc create configmap dynamic-plugins \
                 --from-file=config/dynamic-plugins.yaml \
                 --namespace "$namespace" --dry-run=client -o yaml \
                 | oc apply -f - --namespace "$namespace" >/dev/null
-            merge_orch=true
-        elif [[ "$current_dp" != *auth-backend-module-oidc-provider* ]]; then
             merge_orch=true
         fi
     elif [[ "$current_dp" != *plugin-orchestrator* ]]; then

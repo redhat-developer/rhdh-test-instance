@@ -50,6 +50,11 @@ api_call() {
   return 1
 }
 
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "Error: run $0; do not source it (see update-rhdh-client-redirects.sh for redirects)" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 # Validate JSON files exist and are valid
 [ ! -f "$CLIENT_FILE" ] && echo "Error: Client configuration file not found: $CLIENT_FILE" && exit 1
 jq empty "$CLIENT_FILE" 2>/dev/null || { echo "Error: Invalid JSON in $CLIENT_FILE"; exit 1; }
@@ -241,28 +246,3 @@ export KEYCLOAK_LOGIN_REALM="rhdh"
 export KEYCLOAK_METADATA_URL="$KEYCLOAK_URL/realms/rhdh"
 export KEYCLOAK_BASE_URL="$KEYCLOAK_URL"
 export KEYCLOAK_PROTOCOL
-
-update_rhdh_client_redirects() {
-  local rhdh_url="${1:-}"
-  local redirect client_uuid payload token_response
-  [[ -n "$rhdh_url" ]] || { echo "Error: RHDH URL required to pin Keycloak redirects"; return 1; }
-  redirect="${rhdh_url%/}/api/auth/oidc/handler/frame"
-
-  token_response=$(curl -sk -w "\n%{http_code}" -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-    -d "username=admin&password=admin123&grant_type=password&client_id=admin-cli")
-  TOKEN_HTTP_CODE=$(echo "$token_response" | tail -1)
-  TOKEN_BODY=$(echo "$token_response" | sed '$d')
-  [ "$TOKEN_HTTP_CODE" -ge 400 ] && echo "Error: Failed to refresh admin token (HTTP $TOKEN_HTTP_CODE): $TOKEN_BODY" && return 1
-  ADMIN_TOKEN=$(echo "$TOKEN_BODY" | jq -r '.access_token // empty')
-  [ -z "$ADMIN_TOKEN" ] && echo "Error: Failed to parse refreshed admin token" && return 1
-
-  client_uuid=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients?clientId=rhdh-client" "" "Get rhdh-client" | \
-    jq -r '.[0].id // empty')
-  [ -z "$client_uuid" ] && echo "Error: rhdh-client UUID not found" && return 1
-
-  payload=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$client_uuid" "" "Get rhdh-client representation" | \
-    jq -c --arg uri "$redirect" --arg origin "${rhdh_url%/}" \
-      '.redirectUris = [$uri] | .webOrigins = [$origin] | .implicitFlowEnabled = false')
-  api_call PUT "$KEYCLOAK_URL/admin/realms/rhdh/clients/$client_uuid" "$payload" "Pin rhdh-client redirects" >/dev/null
-  echo "Pinned rhdh-client redirectUris to ${redirect} webOrigins to ${rhdh_url%/}"
-}

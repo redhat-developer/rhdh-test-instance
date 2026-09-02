@@ -45,6 +45,6 @@ Notes:
 - `iib` must include the current cluster's `major.minor` version.
 - `images[].source` should be a full digest reference from the release email.
 - `iib[*]` should also be digest-pinned where possible (`...@sha256:...`).
-- `images[].name` is a short identifier used as the internal registry repo name.
+- `images[].name` is a short label for logs and to detect a `*bundle*` image. The internal registry repo name is derived from `source` (path after the last `/`, before `@`).
 - Set `ENFORCE_DIGEST_PINNING=1` to fail fast when non-digest references are present.
 - Manifest files are ignored by git by default (`config/osl-releases/*.json`), except `example.json`.
