@@ -30,6 +30,12 @@ installation_method="$1"
 version="$2"
 shift 2
 
+# NFS (app-next) is required for next / *-CI. Overlays orchestrator e2e is
+# NFS-only; keys land on rhdh-secrets (see scripts/setup-resources.sh).
+if [[ "$version" == "next" || "$version" == *-CI ]]; then
+    export ENABLE_RHDH_NFS=1
+    echo "NFS enabled (app-next + standard Module Federation via rhdh-secrets)"
+fi
 # Parse optional flags
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -64,7 +70,7 @@ if [[ "$installation_method" != "helm" && "$installation_method" != "operator" ]
     exit 1
 fi
 
-[[ "${OPENSHIFT_CI}" != "true" ]] && source .env
+[[ "${OPENSHIFT_CI}" != "true" && "${SKIP_ENV_SOURCE:-}" != "1" ]] && source .env
 # source utils/utils.sh
 
 # Create or switch to the specified namespace
@@ -121,7 +127,7 @@ else
 fi
 
 # Wait for the deployment to be ready
-oc rollout status deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' -n "$namespace" --timeout=500s || { echo "Error: Timed out waiting for deployment to be ready."; exit 1; }
+oc rollout status deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' -n "$namespace" --timeout=900s || { echo "Error: Timed out waiting for deployment to be ready."; exit 1; }
 
 echo "
 RHDH_BASE_URL : 

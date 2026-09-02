@@ -179,6 +179,41 @@ make undeploy-infra
 make clean
 ```
 
+#### OSL RC smoke
+
+Pin an OSL pre-release against a chosen RHDH version, deploy, and run the default four Playwright tests (skips `orchestrator.spec.ts` beforeAll so it does not reinstall operators):
+
+1. `Run Greeting workflow and verify Workflows tab`
+2. `Run Failswitch workflow and verify statuses`
+3. `Rerun Failswitch from failure point`
+4. `Execute token-propagation workflow via API`
+
+Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). Overlays orchestrator e2e is **NFS-only** (`orchestrator-app-next`): `--test` requires `--namespace` to match that Playwright project (default `orchestrator-app-next`). Deploying `next` / `*-CI` always enables the app-next shell (`APP_CONFIG_app_packageName=app-next` + `ENABLE_STANDARD_MODULE_FEDERATION` on `rhdh-secrets`). Point `--overlays-dir` at an overlays checkout that includes the NFS lane. `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators (`logic-operator` / `serverless-operator` only), the custom catalog, and the mirror namespace, and cleans the RHDH namespace contents. It does not delete a leftover `rhdh` namespace unless you pass `--delete-namespace` (`make cleanup-full`). Other operators in `openshift-operators` are left in place.
+
+`make setup-orchestrator` (and the driver's `--deploy` phase) installs `osl-di-rewrite` in front of Data Index so OSL 1.39 relative `serviceUrl` values still work from RHDH. The GraphQL probe before Playwright hits that rewrite proxy (`osl-di-rewrite`), not raw Data Index. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137); the rewrite fills `serviceUrl` from `endpoint`. If the probe still sees a relative URL, it exits 2 unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`. Drop that override after the Orchestrator plugin derives `serviceUrl` from `endpoint`.
+
+```bash
+# One-shot: full cleanup (including operators) -> mirror OSL -> deploy -> smoke
+make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator-app-next
+
+# Or call the driver directly
+./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1
+./run-osl-regression.sh --cleanup --namespace orchestrator-app-next
+./run-osl-regression.sh --cleanup --prepare-osl --deploy --rhdh next --osl-release 1.39.0.CR1
+./run-osl-regression.sh --test --rhdh next
+./run-osl-regression.sh --test --rhdh next --overlays-dir ../rhdh-plugin-export-overlays
+```
+
+Individual pieces:
+
+```bash
+make prepare-osl OSL_RELEASE=1.39.0.CR1
+make setup-orchestrator VERSION=next ORCH_NAMESPACE=orchestrator-app-next OSL_RELEASE=1.39.0.CR1
+make cleanup-full ORCH_NAMESPACE=orchestrator-app-next
+```
+
+Requires `oc` logged in, `helm`, `skopeo`, `podman`, and a sibling `rhdh-plugin-export-overlays` checkout for `--test` (NFS `orchestrator-app-next` project). Manifests live in `config/osl-releases/`.
+
 #### Status and Debugging
 
 ```bash
@@ -200,6 +235,9 @@ All make commands accept these variables:
 | `USE_CONTAINER`     | `false`                                       | Set to `true` to run commands inside the e2e-runner container             |
 | `CATALOG_INDEX_TAG` | auto                                          | Catalog index image tag (defaults to major.minor from version, or `next`) |
 | `RUNNER_IMAGE`      | `quay.io/rhdh-community/rhdh-e2e-runner:main` | Container image for `install-operator`                                    |
+| `OSL_RELEASE`       | _(empty)_                                     | OSL pre-release id for `prepare-osl` / `osl-regression`                   |
+| `ORCH_NAMESPACE`    | `orchestrator-app-next`                       | Namespace used by orchestrator/OSL setup and cleanup (NFS Playwright project) |
+| `ALLOW_RELATIVE_SERVICE_URL` | _(unset)_                          | Set to `1` to continue smoke if the rewrite probe still sees a relative `serviceUrl` |
 
 > **Note:** `install-operator` requires you to be logged into the cluster via `oc login` on your host.
 > It automatically passes the session token to the e2e-runner container (needs Linux tools like `umoci`, `opm`, `skopeo`).
@@ -373,6 +411,8 @@ rhdh-test-instance/
 │   ├── app-config-rhdh.yaml                # Main RHDH configuration (guest auth by default)
 │   ├── dynamic-plugins.yaml                # Base dynamic plugins configuration
 │   ├── orchestrator-dynamic-plugins.yaml   # Orchestrator plugins (merged when ORCH=true)
+│   ├── orchestrator-dynamic-plugins-next.yaml # next/CI: NFS PluginRoot + OIDC auth module
+│   ├── osl-releases/                       # Local OSL pre-release JSON (gitignored except example)
 │   ├── rbac-policies.yaml                  # RBAC policy ConfigMap
 │   └── rhdh-secrets.yaml                   # Reference template for rhdh-secrets Secret
 ├── helm/
@@ -399,7 +439,24 @@ rhdh-test-instance/
 │   └── plugins/
 │       ├── config-keycloak-plugin.sh       # Keycloak deploy, realm/client/user setup
 │       └── config-lighthouse-plugin.sh     # Lighthouse deploy and URL injection
+├── utils/
+│   ├── shell/
+│   │   ├── common.sh                       # log, die, require_cmd
+│   │   ├── openshift.sh                    # oc login, namespace validation, route helpers
+│   │   └── workspace.sh                    # resolve_workspace_dir
+│   ├── keycloak/
+│   │   ├── lib.sh                          # Shared Keycloak REST + runtime env helpers
+│   │   ├── keycloak-deploy.sh
+│   │   └── update-rhdh-client-redirects.sh
+│   └── orchestrator/
+│       ├── assert-osl-operators.sh         # OSL operator subscription/CSV asserts
+│       ├── probe-dataindex-rewrite.sh      # Data Index GraphQL probe via osl-di-rewrite
+│       └── deploy-smoke-workflows.sh
+├── cleanup.sh                              # Orchestrator/OSL teardown (operators optional)
 ├── deploy.sh                               # Main deploy entry point
+├── prepare-osl-internal.sh                 # Mirror pre-release OSL into the internal registry
+├── run-osl-regression.sh                   # OSL RC smoke driver (cleanup → prepare → deploy → test)
+├── setup-orchestrator.sh                   # RHDH + orchestrator + Keycloak + rewrite proxy
 ├── teardown.sh                             # Main teardown entry point
 ├── Makefile                                # Make targets
 ├── OWNERS                                  # Project maintainers

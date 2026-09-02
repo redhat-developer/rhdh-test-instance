@@ -34,6 +34,20 @@ ROOT_DIR="$(dirname "$DIR")"
 # Secret always has a consistent shape. Empty values are replaced by plugin
 # scripts as they configure their respective services.
 # =============================================================================
+# NFS keys on rhdh-secrets (mounted via extraEnvVarsSecrets). Required for
+# next/*-CI — overlays orchestrator e2e is NFS-only (no legacy packages/app).
+patch_nfs_secrets() {
+  if [[ "${ENABLE_RHDH_NFS:-0}" != "1" ]]; then
+    return 0
+  fi
+  oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge -p '{
+    "stringData": {
+      "APP_CONFIG_app_packageName": "app-next",
+      "ENABLE_STANDARD_MODULE_FEDERATION": "true"
+    }
+  }'
+}
+
 create_rhdh_secrets() {
   echo ""
   echo "Creating rhdh-secrets Secret..."
@@ -41,11 +55,21 @@ create_rhdh_secrets() {
   : "${RHDH_BASE_URL:?RHDH_BASE_URL must be set before setup-resources.sh runs}"
 
   if oc get secret rhdh-secrets --namespace="${NAMESPACE}" &>/dev/null; then
-    # Secret already exists — only update RHDH_BASE_URL so the URL stays
-    # current without rotating SESSION_SECRET or clearing plugin-owned keys.
-    oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge \
-      -p "{\"stringData\":{\"RHDH_BASE_URL\":\"${RHDH_BASE_URL}\"}}"
-    echo "rhdh-secrets already exists — updated RHDH_BASE_URL only."
+    # Keep SESSION_SECRET stable; refresh URLs and Keycloak/orchestrator keys.
+    oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge -p "{
+      \"stringData\": {
+        \"RHDH_BASE_URL\": \"${RHDH_BASE_URL}\",
+        \"KEYCLOAK_BASE_URL\": \"${KEYCLOAK_BASE_URL:-}\",
+        \"KEYCLOAK_METADATA_URL\": \"${KEYCLOAK_METADATA_URL:-}\",
+        \"KEYCLOAK_LOGIN_REALM\": \"${KEYCLOAK_LOGIN_REALM:-}\",
+        \"KEYCLOAK_REALM\": \"${KEYCLOAK_REALM:-}\",
+        \"KEYCLOAK_CLIENT_ID\": \"${KEYCLOAK_CLIENT_ID:-}\",
+        \"KEYCLOAK_CLIENT_SECRET\": \"${KEYCLOAK_CLIENT_SECRET:-}\",
+        \"SONATAFLOW_DATA_INDEX_URL\": \"${SONATAFLOW_DATA_INDEX_URL:-}\"
+      }
+    }"
+    patch_nfs_secrets
+    echo "rhdh-secrets already exists — updated URL/Keycloak/orchestrator keys."
   else
     # Generate a random session secret at deploy time so it is never hardcoded.
     local session_secret
@@ -62,8 +86,9 @@ create_rhdh_secrets() {
       --from-literal=KEYCLOAK_CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET:-}" \
       --from-literal=LIGHTHOUSE_URL="${LIGHTHOUSE_URL:-}" \
       --from-literal=LIGHTHOUSE_SVC_URL="${LIGHTHOUSE_SVC_URL:-}" \
+      --from-literal=SONATAFLOW_DATA_INDEX_URL="${SONATAFLOW_DATA_INDEX_URL:-}" \
       --namespace="${NAMESPACE}"
-
+    patch_nfs_secrets
     echo "rhdh-secrets created!"
   fi
 }

@@ -1,0 +1,389 @@
+#!/bin/bash
+#
+# One-command setup of RHDH + orchestrator for overlays e2e.
+# Deploys Keycloak, installs orchestrator prerequisites, deploys RHDH via Helm,
+# installs osl-di-rewrite in front of Data Index, and verifies the shared
+# existing-RHDH substrate contract.
+#
+# Usage:
+#   ./setup-orchestrator.sh <version> [--namespace <ns>] [--prepare-internal-osl <release>]
+#
+# Examples:
+#   ./setup-orchestrator.sh 1.9
+#   ./setup-orchestrator.sh 1.9-200-CI
+#   ./setup-orchestrator.sh next --namespace rhdh-test
+#   ./setup-orchestrator.sh 1.9 --prepare-internal-osl 1.39.0.CR1
+#   ./setup-orchestrator.sh 1.10 --prepare-internal-osl 1.39.0.CR1
+#
+# Options:
+#   --namespace <ns>    Target namespace (default: orchestrator-app-next)
+#   --prepare-internal-osl <release>
+#                       Mirror pre-release OSL images into the OpenShift internal
+#                       registry, generate a rewritten internal logic-only catalog,
+#                       create CatalogSource, and write .env.osl with OSL_* exports
+#                       for this run.
+# Prerequisites:
+#   - oc logged in to the target cluster
+#   - helm, git, jq available on PATH
+#   - .env file configured (or --prepare-internal-osl to generate .env.osl)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/utils/shell/common.sh"
+source "${SCRIPT_DIR}/utils/shell/workspace.sh"
+source "${SCRIPT_DIR}/utils/shell/openshift.sh"
+source "${SCRIPT_DIR}/utils/keycloak/lib.sh"
+source "${SCRIPT_DIR}/utils/orchestrator/assert-osl-operators.sh"
+WORKSPACE_DIR="$(resolve_workspace_dir "$SCRIPT_DIR")"
+RHDH_E2E_TEST_UTILS_DIR="${RHDH_E2E_TEST_UTILS_DIR:-${WORKSPACE_DIR}/rhdh-e2e-test-utils}"
+SHARED_INSTALL_SCRIPT="${RHDH_E2E_TEST_UTILS_DIR}/dist/deployment/orchestrator/install-orchestrator.sh"
+SHARED_VERIFY_EXISTING_RHDH_SCRIPT="${SHARED_VERIFY_EXISTING_RHDH_SCRIPT:-${RHDH_E2E_TEST_UTILS_DIR}/dist/deployment/orchestrator/verify-existing-rhdh.sh}"
+KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-rhdh-keycloak}"
+
+# ── Argument parsing ─────────────────────────────────────────────────────────
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 <version> [--namespace <ns>] [--prepare-internal-osl <release>]"
+    echo ""
+    echo "Examples:"
+    echo "  $0 1.9              # latest 1.9.x chart"
+    echo "  $0 1.9-200-CI       # specific CI build"
+    echo "  $0 next             # latest development build"
+    echo "  $0 1.9 --prepare-internal-osl 1.39.0.CR1"
+    echo "  $0 1.10 --prepare-internal-osl 1.39.0.CR1"
+    exit 1
+fi
+
+version="$1"
+shift
+
+namespace="orchestrator-app-next"
+prepare_internal_osl_release=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --namespace)
+            namespace="$2"
+            shift 2
+            ;;
+        --prepare-internal-osl)
+            prepare_internal_osl_release="${2:-}"
+            shift 2
+            ;;
+        *)
+            echo "Error: Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+cd "$SCRIPT_DIR"
+
+# ── Validate inputs ──────────────────────────────────────────────────────────
+
+require_oc_login
+validate_k8s_namespace "$namespace"
+
+assert_empty_baseline() {
+    local ns="$1"
+    local keycloak_ns="$2"
+    local found=0
+
+    if [[ "${SKIP_EMPTY_BASELINE:-}" == "1" ]]; then
+        echo "==> Skipping empty-baseline check (SKIP_EMPTY_BASELINE=1)."
+        return 0
+    fi
+
+    echo "==> Verifying clean baseline (no existing RHDH/OSL components)..."
+
+    if helm status redhat-developer-hub -n "$ns" >/dev/null 2>&1; then
+        echo "Error: Existing Helm release 'redhat-developer-hub' found in namespace '$ns'."
+        found=1
+    fi
+
+    if oc get deployment redhat-developer-hub -n "$ns" >/dev/null 2>&1; then
+        echo "Error: Existing deployment/redhat-developer-hub found in namespace '$ns'."
+        found=1
+    fi
+
+    if oc get sonataflowplatform -n "$ns" --no-headers 2>/dev/null | grep -q .; then
+        echo "Error: Existing SonataFlowPlatform resources found in namespace '$ns'."
+        found=1
+    fi
+
+    if oc get sonataflow -n "$ns" --no-headers 2>/dev/null | grep -q .; then
+        echo "Error: Existing SonataFlow workflow resources found in namespace '$ns'."
+        found=1
+    fi
+
+    if oc get subscription serverless-operator -n openshift-operators >/dev/null 2>&1; then
+        echo "Error: Existing Subscription/serverless-operator found in openshift-operators."
+        found=1
+    fi
+
+    if oc get subscription logic-operator -n openshift-operators >/dev/null 2>&1; then
+        echo "Error: Existing Subscription/logic-operator found in openshift-operators."
+        found=1
+    fi
+
+    if oc get catalogsource osl-custom-catalog -n openshift-marketplace >/dev/null 2>&1; then
+        if [[ -n "${OSL_CATALOG_SOURCE:-}" ]]; then
+            echo "==> CatalogSource/osl-custom-catalog present from prepare-osl; allowing it."
+        else
+            echo "Error: Existing CatalogSource/osl-custom-catalog found in openshift-marketplace."
+            found=1
+        fi
+    fi
+
+    if oc get statefulset keycloak -n "$keycloak_ns" >/dev/null 2>&1 || \
+       oc get deployment keycloak -n "$keycloak_ns" >/dev/null 2>&1; then
+        echo "Error: Existing Keycloak deployment found in namespace '$keycloak_ns'."
+        found=1
+    fi
+
+    if [[ $found -ne 0 ]]; then
+        echo ""
+        echo "Cluster is not clean. Run cleanup first, e.g.:"
+        echo "  ./cleanup.sh --namespace ${ns} --include-operators --delete-namespace"
+        echo "Then rerun setup."
+        exit 1
+    fi
+}
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+log_debug() { echo "[DEBUG $(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
+phase_checkpoint() { echo "[CHECKPOINT] $*"; }
+
+emit_diag_hints() {
+    local ns="$1"
+    echo "Diagnostics to run:"
+    echo "  oc get pods -n ${ns}"
+    echo "  oc get events -n ${ns} --sort-by=.lastTimestamp | tail -n 30"
+    echo "  oc describe deployment redhat-developer-hub -n ${ns}"
+    echo "  oc get csv -n openshift-operators"
+}
+
+ensure_shared_scripts() {
+    if [[ ! -x "$SHARED_INSTALL_SCRIPT" || ! -x "$SHARED_VERIFY_EXISTING_RHDH_SCRIPT" ]]; then
+        if [[ -f "${RHDH_E2E_TEST_UTILS_DIR}/package.json" ]]; then
+            log "Building shared rhdh-e2e-test-utils artifacts..."
+            (cd "$RHDH_E2E_TEST_UTILS_DIR" && yarn build >/dev/null)
+        fi
+    fi
+    if [[ ! -x "$SHARED_INSTALL_SCRIPT" ]]; then
+        echo "Error: Shared install script not found: $SHARED_INSTALL_SCRIPT"
+        exit 1
+    fi
+    if [[ ! -x "$SHARED_VERIFY_EXISTING_RHDH_SCRIPT" ]]; then
+        echo "Error: Existing-RHDH verification script not found or not executable: $SHARED_VERIFY_EXISTING_RHDH_SCRIPT"
+        echo "Hint: set SHARED_VERIFY_EXISTING_RHDH_SCRIPT to override, or build rhdh-e2e-test-utils (yarn build)."
+        exit 1
+    fi
+    log "Using existing-RHDH verification script: $SHARED_VERIFY_EXISTING_RHDH_SCRIPT"
+}
+
+run_shared_orchestrator_install() {
+    local args=("$namespace")
+
+    ensure_shared_scripts
+
+    if [[ -n "${OSL_CATALOG_SOURCE:-}" ]]; then
+        args+=(--logic-operator-source "${OSL_CATALOG_SOURCE}")
+        args+=(--logic-operator-source-namespace "openshift-marketplace")
+    fi
+    [[ -n "${OSL_LOGIC_PACKAGE:-}" ]] && args+=(--logic-operator-package "${OSL_LOGIC_PACKAGE}")
+    [[ -n "${OSL_LOGIC_CHANNEL:-}" ]] && args+=(--logic-operator-channel "${OSL_LOGIC_CHANNEL}")
+    [[ -n "${OSL_LOGIC_CSV:-}" ]] && args+=(--logic-operator-starting-csv "${OSL_LOGIC_CSV}")
+    [[ -n "${OSL_SERVERLESS_PACKAGE:-}" ]] && args+=(--serverless-operator-package "${OSL_SERVERLESS_PACKAGE}")
+    [[ -n "${OSL_SERVERLESS_CHANNEL:-}" ]] && args+=(--serverless-operator-channel "${OSL_SERVERLESS_CHANNEL}")
+    [[ -n "${OSL_SERVERLESS_SOURCE:-}" ]] && args+=(--serverless-operator-source "${OSL_SERVERLESS_SOURCE}")
+    [[ -n "${OSL_SERVERLESS_SOURCE_NAMESPACE:-}" ]] && args+=(--serverless-operator-source-namespace "${OSL_SERVERLESS_SOURCE_NAMESPACE}")
+
+    log_debug "Shared orchestrator install args: ${args[*]}"
+    bash "$SHARED_INSTALL_SCRIPT" "${args[@]}"
+    phase_checkpoint "shared-orchestrator-installed"
+}
+
+prepare_keycloak() {
+    bash "$SCRIPT_DIR/utils/keycloak/keycloak-deploy.sh" "$KEYCLOAK_NAMESPACE"
+}
+
+verify_shared_existing_rhdh_contract() {
+    log "Verifying shared existing-RHDH contract in ${namespace}..."
+    bash "$SHARED_VERIFY_EXISTING_RHDH_SCRIPT" "$namespace" --require-keycloak
+    phase_checkpoint "shared-existing-rhdh-verified"
+}
+
+log_debug "Entrypoint args: version=${version}, namespace=${namespace}, prepareInternalOsl=${prepare_internal_osl_release:-none}"
+phase_checkpoint "cluster-connectivity-validated"
+if [[ -f "${SCRIPT_DIR}/.env.osl" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/.env.osl"
+    log "Loaded existing .env.osl before baseline (OSL_CATALOG_SOURCE=${OSL_CATALOG_SOURCE:-unset})"
+fi
+assert_empty_baseline "$namespace" "$KEYCLOAK_NAMESPACE"
+
+wait_for_rhdh_auth_and_orchestrator_ready() {
+    local ns="$1"
+    local timeout_secs="${2:-240}"
+    local start_time rhdh_url
+    start_time=$(date +%s)
+    rhdh_url="$(openshift_route_url redhat-developer-hub "$ns")" || {
+        echo "Error: Could not resolve RHDH route in namespace '$ns'."
+        return 1
+    }
+
+    log "Waiting for RHDH auth/backend HTTP readiness at ${rhdh_url}..."
+    while true; do
+        local elapsed auth_status auth_location app_health orch_health
+        elapsed=$(( $(date +%s) - start_time ))
+        if [[ $elapsed -ge $timeout_secs ]]; then
+            echo "Error: Timed out waiting for auth/backend HTTP readiness after ${timeout_secs}s"
+            echo "  Last auth status: ${auth_status:-unknown}"
+            echo "  Last auth redirect: ${auth_location:-<empty>}"
+            echo "  Last backend health: ${app_health:-unknown}"
+            echo "  Last orchestrator health: ${orch_health:-unknown}"
+            return 1
+        fi
+
+        auth_status=$(curl -sk -o /dev/null -w '%{http_code}' "${rhdh_url}/api/auth/oidc/start?env=production" || true)
+        auth_location=$(curl -sk -D - -o /dev/null "${rhdh_url}/api/auth/oidc/start?env=production" | \
+            awk 'BEGIN{IGNORECASE=1} /^location:/ {print $2; exit}' | tr -d '\r')
+        app_health=$(curl -sk -o /dev/null -w '%{http_code}' "${rhdh_url}/api/app/health" || true)
+        orch_health=$(curl -sk -o /dev/null -w '%{http_code}' "${rhdh_url}/api/orchestrator/health" || true)
+
+        if [[ "$app_health" == "200" && "$auth_status" == "302" && "$auth_location" =~ ^https?:// && "$orch_health" == "200" ]]; then
+            log "RHDH auth/backend/orchestrator readiness checks passed."
+            return 0
+        fi
+
+        sleep 3
+    done
+}
+
+run_post_setup_workflow_smoke() {
+    local ns="$1"
+    local run_smoke="${POST_SETUP_WORKFLOW_SMOKE:-1}"
+    if [[ "$run_smoke" != "1" ]]; then
+        log "Skipping post-setup workflow smoke (POST_SETUP_WORKFLOW_SMOKE=${run_smoke})."
+        return 0
+    fi
+
+    log "Running post-setup workflow smoke in namespace ${ns}..."
+    bash "$SCRIPT_DIR/utils/orchestrator/deploy-smoke-workflows.sh" "$ns" greeting
+
+    oc exec -n "$ns" deploy/sonataflow-platform-data-index-service -- \
+        curl -sf --max-time 5 "http://localhost:8080/q/health/ready" >/dev/null
+
+    local orchestrator_url orch_health
+    orchestrator_url="$(openshift_route_url redhat-developer-hub "$ns")" || {
+        echo "Error: Could not resolve RHDH route for post-setup smoke."
+        exit 1
+    }
+    orch_health="$(curl -sk -o /dev/null -w '%{http_code}' "${orchestrator_url}/api/orchestrator/health" || true)"
+    if [[ "$orch_health" != "200" ]]; then
+        echo "Error: Post-smoke orchestrator health check failed (HTTP ${orch_health})."
+        exit 1
+    fi
+
+    phase_checkpoint "post-setup-workflow-smoke-passed"
+}
+
+# ── Internal pre-release OSL preparation ──────────────────────────────────────
+
+if [[ -n "$prepare_internal_osl_release" ]]; then
+    log "Preparing internal OSL mirror for release ${prepare_internal_osl_release}..."
+    "${SCRIPT_DIR}/prepare-osl-internal.sh" --release "${prepare_internal_osl_release}" --namespace "${namespace}"
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/.env.osl"
+    log "Loaded OSL_IIB_IMAGE=${OSL_IIB_IMAGE}"
+    log "Loaded OSL_VERSION=${OSL_VERSION}"
+    log "Loaded OSL_LOGIC_CSV=${OSL_LOGIC_CSV}"
+    log "Loaded OSL_CATALOG_SOURCE=${OSL_CATALOG_SOURCE}"
+    phase_checkpoint "internal-mirror-prep-complete"
+fi
+
+# ── Pre-deploy: export secrets for envsubst in helm/deploy.sh ───────────────
+
+export BACKEND_SECRET="${BACKEND_SECRET:-$(openssl rand -hex 32)}"
+export NODE_TLS_REJECT_UNAUTHORIZED="${NODE_TLS_REJECT_UNAUTHORIZED:-1}"
+
+# ── Pre-deploy: shared orchestrator install spine ───────────────────────────
+
+if [[ -n "${OSL_VERSION:-}" && -n "${OSL_IIB_IMAGE:-}" && -z "${OSL_LOGIC_CSV:-}" ]]; then
+    OSL_LOGIC_CSV="logic-operator.v$(extract_major_minor "${OSL_VERSION}").0"
+fi
+
+log "Preparing Keycloak before shared orchestrator install..."
+prepare_keycloak
+export_keycloak_runtime_env "$KEYCLOAK_NAMESPACE"
+
+run_shared_orchestrator_install
+assert_pre_release_install_state
+
+# ── Deploy RHDH + orchestrator ──────────────────────────────────────────────
+
+export SONATAFLOW_DATA_INDEX_URL="http://sonataflow-platform-data-index-service.${namespace}.svc.cluster.local"
+export IS_AUTH_ENABLED="true"
+
+log "Deploying RHDH $version with shared orchestrator support"
+SKIP_ENV_SOURCE=1 \
+SKIP_ORCHESTRATOR_INFRA_INSTALL=1 \
+./deploy.sh helm "$version" --namespace "$namespace" --with-orchestrator
+phase_checkpoint "rhdh-deployed"
+
+RHDH_BASE_URL="$(openshift_route_url redhat-developer-hub "$namespace")" || {
+    echo "Error: Could not resolve RHDH route after deploy."
+    exit 1
+}
+export RHDH_BASE_URL
+bash "$SCRIPT_DIR/utils/keycloak/update-rhdh-client-redirects.sh" "$KEYCLOAK_NAMESPACE" "$RHDH_BASE_URL"
+
+# ── Verify overlays existing-RHDH contract ───────────────────────────────────
+
+verify_shared_existing_rhdh_contract
+phase_checkpoint "overlays-existing-rhdh-prepared"
+
+# ── Wait for RHDH readiness ─────────────────────────────────────────────────
+
+log "Waiting for RHDH to become ready..."
+oc rollout status deployment/redhat-developer-hub -n "$namespace" --timeout=600s || {
+    echo "Warning: RHDH did not become ready within timeout"
+    emit_diag_hints "$namespace"
+}
+wait_for_rhdh_auth_and_orchestrator_ready "$namespace"
+log "Installing osl-di-rewrite in front of Data Index (SRVLOGIC-1137 relative serviceUrl)"
+"${SCRIPT_DIR}/utils/orchestrator/ensure-dataindex-rewrite.sh" "$namespace"
+wait_for_rhdh_auth_and_orchestrator_ready "$namespace"
+run_post_setup_workflow_smoke "$namespace"
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+
+RHDH_URL="${RHDH_BASE_URL}"
+KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-}"
+
+echo ""
+echo "==========================================="
+echo "  Setup Complete"
+echo "==========================================="
+echo ""
+echo "RHDH URL:      $RHDH_URL"
+echo "Keycloak URL:  $KEYCLOAK_URL"
+echo "Keycloak Admin: admin / admin123"
+echo "Test Users:    test1 / test1@123, test2 / test2@123"
+echo ""
+DEPLOYED_CV=$(helm list -n "$namespace" -f redhat-developer-hub -o json 2>/dev/null | jq -r '.[0].chart // empty' | sed 's/^redhat-developer-hub-//')
+echo "Namespace:     $namespace"
+echo "Chart Version: ${DEPLOYED_CV:-unknown}"
+echo ""
+echo "Pod status:"
+oc get pods -n "$namespace" --no-headers 2>/dev/null | sed 's/^/  /'
+echo ""
+echo "SonataFlow workflows:"
+oc get sonataflow -n "$namespace" --no-headers 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+echo ""
+echo "OSL operator versions:"
+oc get csv -n openshift-operators --no-headers -o custom-columns='NAME:.metadata.name,VERSION:.spec.version' 2>/dev/null | sed 's/^/  /' || true
+echo ""

@@ -27,6 +27,7 @@
             signIn:
               resolvers:
                 - resolver: emailLocalPartMatchingUserEntityName
+                  dangerouslyAllowSignInWithoutUserInCatalog: true
         guest:
           dangerouslyAllowOutsideDevelopment: false
     signInPage: oidc
