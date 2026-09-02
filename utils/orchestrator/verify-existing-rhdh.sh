@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-namespace="orchestrator"
+namespace="orchestrator-app-next"
 if [[ $# -gt 0 && "$1" != --* ]]; then
   namespace="$1"
   shift

@@ -10,7 +10,9 @@ auth:
         callbackUrl: '${RHDH_BASE_URL}/api/auth/oidc/handler/frame'
         signIn:
           resolvers:
-            - resolver: preferredUsernameMatchingUserEntityName
+            # Upstream oidc-provider (GHCR pin) exposes emailLocalPart / emailMatching
+            # only. preferredUsernameMatchingUserEntityName is not in that module.
+            - resolver: emailLocalPartMatchingUserEntityName
               dangerouslyAllowSignInWithoutUserInCatalog: true
     guest:
       dangerouslyAllowOutsideDevelopment: false

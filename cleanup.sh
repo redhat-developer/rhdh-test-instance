@@ -254,9 +254,12 @@ helm uninstall orch-infra -n orchestrator-infra 2>/dev/null || true
 # ---------------------------------------------------------------------------
 # 2. Clean namespaces created by orchestrator e2e tests
 #    (rhdh-plugin-export-overlays/workspaces/orchestrator/e2e-tests)
-#    Tests deploy into "orchestrator" or "orchestrator-e2e" ns and Keycloak into
-#    "rhdh-keycloak" ns.
+#    Tests deploy into "orchestrator-app-next" (NFS) or older "orchestrator" /
+#    "orchestrator-e2e" namespaces, and Keycloak into "rhdh-keycloak".
 # ---------------------------------------------------------------------------
+if [[ "$namespace" != "orchestrator-app-next" ]]; then
+    clean_namespace "orchestrator-app-next"
+fi
 if [[ "$namespace" != "orchestrator" ]]; then
     clean_namespace "orchestrator"
 fi

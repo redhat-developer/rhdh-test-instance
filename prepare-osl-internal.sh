@@ -49,7 +49,7 @@ PULLER_GROUPS=(
     "system:serviceaccounts:openshift-serverless"
     "system:serviceaccounts:openshift-serverless-logic"
 )
-rhdh_namespace="orchestrator"
+rhdh_namespace="orchestrator-app-next"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,7 +65,7 @@ Options:
   --release-manifest <path>     Explicit manifest JSON path (overrides --release lookup)
   --ocp-minor <major.minor>     Override detected cluster version (e.g. 4.17)
   --mirror-namespace <name>     Internal registry project (default: osl-mirror)
-  --namespace <name>            RHDH namespace granted image-puller on the mirror (default: orchestrator)
+  --namespace <name>            RHDH namespace granted image-puller on the mirror (default: orchestrator-app-next)
   --multi-arch                  Mirror all architectures (default: amd64 only)
   -h, --help                    Show this help
 EOF

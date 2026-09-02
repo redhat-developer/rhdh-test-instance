@@ -95,8 +95,8 @@ deploy.sh (entry point)
 ### Deployment flow
 
 1. Keycloak is deployed first (Bitnami Helm chart) with an OIDC client (`rhdh-client`) and test users (`test1`/`test2`, password: `test1@123`/`test2@123`).
-2. Environment variables (Keycloak URLs, credentials) are exported and substituted into `config/rhdh-secrets.yaml`.
-3. `config/app-config-rhdh.yaml` configures RHDH with OIDC auth pointing to Keycloak and catalog entity locations from GitHub.
+2. Environment variables (Keycloak URLs, credentials) are written into the `rhdh-secrets` Secret by `scripts/setup-resources.sh` (`create_rhdh_secrets`). For `next` / `*-CI`, that also sets NFS (`APP_CONFIG_app_packageName=app-next`, `ENABLE_STANDARD_MODULE_FEDERATION`). `config/rhdh-secrets.yaml` is a reference template only.
+3. `config/app-config-oidc.yaml` (merged into the app-config ConfigMap) configures RHDH with OIDC auth pointing to Keycloak; catalog entity locations come from `config/app-config-rhdh.yaml`.
 4. For Helm: the RHDH chart is installed with dynamic plugins config. For Operator: a Backstage CR is applied referencing the ConfigMaps.
 5. When `ORCH=true`, orchestrator plugins are merged into `dynamic-plugins.yaml` and serverless operators are installed.
 

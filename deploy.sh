@@ -30,6 +30,12 @@ installation_method="$1"
 version="$2"
 shift 2
 
+# NFS (app-next) is required for next / *-CI. Overlays orchestrator e2e is
+# NFS-only; keys land on rhdh-secrets (see scripts/setup-resources.sh).
+if [[ "$version" == "next" || "$version" == *-CI ]]; then
+    export ENABLE_RHDH_NFS=1
+    echo "NFS enabled (app-next + standard Module Federation via rhdh-secrets)"
+fi
 # Parse optional flags
 while [[ $# -gt 0 ]]; do
     case "$1" in

@@ -188,33 +188,33 @@ Pin an OSL pre-release against a chosen RHDH version, deploy, and run the defaul
 3. `Rerun Failswitch from failure point`
 4. `Execute token-propagation workflow via API`
 
-Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). `--test` requires `--namespace orchestrator` (the default): overlays Playwright uses the project name as the Kubernetes namespace for Data Index and Failswitch retrigger. `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators (`logic-operator` / `serverless-operator` only), the custom catalog, and the mirror namespace, and cleans the RHDH namespace contents. It does not delete a leftover `rhdh` namespace unless you pass `--delete-namespace` (`make cleanup-full`). Other operators in `openshift-operators` are left in place.
+Smoke always deploys greeting, failswitch, token-propagation, and `sample-server`, then runs token-propagation (JWT/OpenAPI into the workflow). Overlays orchestrator e2e is **NFS-only** (`orchestrator-app-next`): `--test` requires `--namespace` to match that Playwright project (default `orchestrator-app-next`). Deploying `next` / `*-CI` always enables the app-next shell (`APP_CONFIG_app_packageName=app-next` + `ENABLE_STANDARD_MODULE_FEDERATION` on `rhdh-secrets`). Point `--overlays-dir` at an overlays checkout that includes the NFS lane. `--cleanup` (and the cleanup phase of `--all`) always removes OSL/Serverless operators (`logic-operator` / `serverless-operator` only), the custom catalog, and the mirror namespace, and cleans the RHDH namespace contents. It does not delete a leftover `rhdh` namespace unless you pass `--delete-namespace` (`make cleanup-full`). Other operators in `openshift-operators` are left in place.
 
 `make setup-orchestrator` (and the driver's `--deploy` phase) installs `osl-di-rewrite` in front of Data Index so OSL 1.39 relative `serviceUrl` values still work from RHDH. The GraphQL probe before Playwright still hits the **raw** Data Index (`sonataflow-platform-data-index-service`), not that proxy. OSL 1.39.CR1 can return a relative `ProcessDefinitions.serviceUrl` (SRVLOGIC-1137). The Orchestrator plugin then cannot `POST` to execute/abort/retrigger. The probe exits 2 on that unless you pass `--allow-relative-service-url` or `ALLOW_RELATIVE_SERVICE_URL=1`, which prints a warning and continues so the four tests can still run behind the rewrite proxy. Drop that override after the plugin derives `serviceUrl` from `endpoint`.
 
 ```bash
 # One-shot: full cleanup (including operators) -> mirror OSL -> deploy -> smoke
-make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator
+make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator-app-next
 # 1.39.CR1 currently needs the relative-serviceUrl override:
-ALLOW_RELATIVE_SERVICE_URL=1 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1 ORCH_NAMESPACE=orchestrator
+ALLOW_RELATIVE_SERVICE_URL=1 make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1
 
 # Or call the driver directly
-./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1 --namespace orchestrator
-./run-osl-regression.sh --cleanup --namespace orchestrator
+./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1
+./run-osl-regression.sh --cleanup --namespace orchestrator-app-next
 ./run-osl-regression.sh --cleanup --prepare-osl --deploy --rhdh next --osl-release 1.39.0.CR1
-ALLOW_RELATIVE_SERVICE_URL=1 ./run-osl-regression.sh --test --namespace orchestrator
-./run-osl-regression.sh --test --overlays-dir ../rhdh-plugin-export-overlays
+ALLOW_RELATIVE_SERVICE_URL=1 ./run-osl-regression.sh --test --rhdh next
+./run-osl-regression.sh --test --rhdh next --overlays-dir ../rhdh-plugin-export-overlays
 ```
 
 Individual pieces:
 
 ```bash
 make prepare-osl OSL_RELEASE=1.39.0.CR1
-make setup-orchestrator VERSION=next ORCH_NAMESPACE=orchestrator OSL_RELEASE=1.39.0.CR1
-make cleanup-full ORCH_NAMESPACE=orchestrator
+make setup-orchestrator VERSION=next ORCH_NAMESPACE=orchestrator-app-next OSL_RELEASE=1.39.0.CR1
+make cleanup-full ORCH_NAMESPACE=orchestrator-app-next
 ```
 
-Requires `oc` logged in, `helm`, `skopeo`, `podman`, and a sibling `rhdh-plugin-export-overlays` checkout for `--test`. Manifests live in `config/osl-releases/`.
+Requires `oc` logged in, `helm`, `skopeo`, `podman`, and a sibling `rhdh-plugin-export-overlays` checkout for `--test` (NFS `orchestrator-app-next` project). Manifests live in `config/osl-releases/`.
 
 #### Status and Debugging
 
@@ -238,7 +238,7 @@ All make commands accept these variables:
 | `CATALOG_INDEX_TAG` | auto                                          | Catalog index image tag (defaults to major.minor from version, or `next`) |
 | `RUNNER_IMAGE`      | `quay.io/rhdh-community/rhdh-e2e-runner:main` | Container image for `install-operator`                                    |
 | `OSL_RELEASE`       | _(empty)_                                     | OSL pre-release id for `prepare-osl` / `osl-regression`                   |
-| `ORCH_NAMESPACE`    | `orchestrator`                                | Namespace used by orchestrator/OSL setup and cleanup                      |
+| `ORCH_NAMESPACE`    | `orchestrator-app-next`                       | Namespace used by orchestrator/OSL setup and cleanup (NFS Playwright project) |
 | `ALLOW_RELATIVE_SERVICE_URL` | _(unset)_                          | Set to `1` to continue smoke after a relative Data Index `serviceUrl`     |
 
 > **Note:** `install-operator` requires you to be logged into the cluster via `oc login` on your host.
@@ -413,6 +413,7 @@ rhdh-test-instance/
 │   ├── app-config-rhdh.yaml                # Main RHDH configuration (guest auth by default)
 │   ├── dynamic-plugins.yaml                # Base dynamic plugins configuration
 │   ├── orchestrator-dynamic-plugins.yaml   # Orchestrator plugins (merged when ORCH=true)
+│   ├── orchestrator-dynamic-plugins-next.yaml # next/CI: NFS PluginRoot + OIDC auth module
 │   ├── osl-releases/                       # Local OSL pre-release JSON (gitignored except example)
 │   ├── rbac-policies.yaml                  # RBAC policy ConfigMap
 │   └── rhdh-secrets.yaml                   # Reference template for rhdh-secrets Secret

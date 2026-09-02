@@ -16,7 +16,7 @@
 #   ./setup-orchestrator.sh 1.10 --prepare-internal-osl 1.39.0.CR1
 #
 # Options:
-#   --namespace <ns>    Target namespace (default: orchestrator)
+#   --namespace <ns>    Target namespace (default: orchestrator-app-next)
 #   --prepare-internal-osl <release>
 #                       Mirror pre-release OSL images into the OpenShift internal
 #                       registry, generate a rewritten internal logic-only catalog,
@@ -58,7 +58,7 @@ fi
 version="$1"
 shift
 
-namespace="orchestrator"
+namespace="orchestrator-app-next"
 prepare_internal_osl_release=""
 while [[ $# -gt 0 ]]; do
     case "$1" in

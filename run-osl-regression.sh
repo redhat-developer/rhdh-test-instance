@@ -7,7 +7,7 @@
 #
 # Usage:
 #   ./run-osl-regression.sh --all --rhdh next --osl-release 1.39.0.CR1
-#   ./run-osl-regression.sh --cleanup --namespace orchestrator
+#   ./run-osl-regression.sh --cleanup --namespace orchestrator-app-next
 #   ./run-osl-regression.sh --test --overlays-dir ../rhdh-plugin-export-overlays
 #
 set -euo pipefail
@@ -25,6 +25,8 @@ RHDH_RELEASE="redhat-developer-hub"
 SMOKE_WRAPPER_SRC="${SCRIPT_DIR}/playwright/osl-regression-smoke.spec.ts"
 SMOKE_WRAPPER_NAME="osl-regression-smoke.spec.ts"
 SMOKE_GREP='Run Greeting workflow and verify Workflows tab|Run Failswitch workflow and verify statuses|Rerun Failswitch from failure point|Execute token-propagation workflow via API'
+# Overlays NFS lane (upstream): Playwright project name == k8s namespace.
+DEFAULT_NAMESPACE="orchestrator-app-next"
 WORKFLOW_REPO="${SERVERLESS_WORKFLOWS_REPO:-https://github.com/rhdhorchestrator/serverless-workflows.git}"
 WORKFLOW_REPO_REF="${SERVERLESS_WORKFLOWS_REF:-daeeee8dec16beab6d96a81774ef500081a2c2b0}"
 DEMO_WORKFLOW_REPO="${ORCHESTRATOR_DEMO_REPO:-https://github.com/rhdhorchestrator/orchestrator-demo.git}"
@@ -41,7 +43,7 @@ allow_relative_service_url=false
 rhdh=""
 osl_release=""
 osl_manifest=""
-namespace="orchestrator"
+namespace="$DEFAULT_NAMESPACE"
 overlays_dir="$DEFAULT_OVERLAYS"
 
 usage() {
@@ -56,13 +58,13 @@ Phases (any subset; always run in this order): cleanup, prepare-osl, deploy, tes
   --test                        Probe Data Index, then run the four Playwright smoke tests
 
 Options:
-  --rhdh <version>              RHDH version (required with --deploy / --all)
+  --rhdh <version>              RHDH version (required with --deploy / --test / --all)
   --osl-release <version>       Load config/osl-releases/<version>.json
   --osl-manifest <path>         Explicit OSL manifest path
-  --namespace <ns>              RHDH/orchestrator namespace (default: orchestrator).
-                                --test requires orchestrator because overlays
-                                Playwright uses the project name as the k8s ns.
-  --overlays-dir <path>         rhdh-plugin-export-overlays checkout
+  --namespace <ns>              RHDH/orchestrator namespace (default: ${DEFAULT_NAMESPACE}).
+                                --test requires the namespace to match the overlays
+                                Playwright project (NFS: orchestrator-app-next).
+  --overlays-dir <path>         rhdh-plugin-export-overlays checkout (NFS lane)
   --allow-relative-service-url  OSL 1.39 Data Index may return a relative
                                 ProcessDefinitions.serviceUrl (SRVLOGIC-1137).
                                 The GraphQL probe fails on that by default.
@@ -116,6 +118,18 @@ overlays_e2e_dir() {
     echo "${overlays_dir}/workspaces/orchestrator/e2e-tests"
 }
 
+# NFS Playwright project (upstream overlays). Namespace must match.
+resolve_playwright_project() {
+    local cfg
+    cfg="$(overlays_e2e_dir)/playwright.config.ts"
+    [[ -f "$cfg" ]] || die "overlays playwright.config.ts not found: $cfg"
+    if grep -Eq 'name:[[:space:]]*["'\'']orchestrator-app-next["'\'']' "$cfg"; then
+        echo "orchestrator-app-next"
+        return
+    fi
+    die "overlays checkout lacks NFS Playwright project 'orchestrator-app-next' in $cfg (pass --overlays-dir to an NFS lane checkout)"
+}
+
 resolve_manifest() {
     if [[ -n "$osl_manifest" ]]; then
         echo "$osl_manifest"
@@ -151,6 +165,7 @@ preflight() {
     fi
 
     if [[ "$run_test" == "true" ]]; then
+        [[ -n "$rhdh" ]] || die "--rhdh is required when --test is selected"
         require_cmd git
         local pkg
         pkg="$(overlays_e2e_dir)/package.json"
@@ -507,21 +522,23 @@ phase_deploy() {
         # shellcheck disable=SC1091
         source "${SCRIPT_DIR}/.env.osl"
     fi
+    # NFS env for next/*-CI is set inside deploy.sh before secrets/Helm.
+    # Data Index rewrite is installed by setup-orchestrator.sh after Helm.
     POST_SETUP_WORKFLOW_SMOKE=0 \
         SKIP_EMPTY_BASELINE=1 \
         ALLOW_OSL_SERVERLESS_VERSION_SKEW=1 \
         "${SCRIPT_DIR}/setup-orchestrator.sh" "$rhdh" --namespace "$namespace"
-    ensure_dataindex_rewrite "$namespace"
 }
 
 phase_test() {
     log "[test]"
-    if [[ "$namespace" != "orchestrator" ]]; then
-        die "OSL Playwright smoke requires --namespace orchestrator (overlays tests use Playwright project name as the k8s namespace)"
-    fi
     overlays_dir="$(cd "$overlays_dir" && pwd)"
-    local e2e smoke_spec="" backup="" rc=0 allow_relative=false
+    local e2e smoke_spec="" backup="" rc=0 allow_relative=false pw_project
     e2e="$(overlays_e2e_dir)"
+    pw_project="$(resolve_playwright_project)"
+    if [[ "$namespace" != "$pw_project" ]]; then
+        die "OSL Playwright smoke requires --namespace ${pw_project} (overlays project name is the k8s namespace; got '${namespace}')"
+    fi
     ensure_e2e_deps "$e2e"
 
     export K8S_CLUSTER_ROUTER_BASE RHDH_BASE_URL KEYCLOAK_BASE_URL RHDH_VERSION
@@ -537,7 +554,7 @@ phase_test() {
     K8S_CLUSTER_ROUTER_BASE="$(cluster_router_base)"
     RHDH_BASE_URL="$(route_url "$RHDH_RELEASE" "$namespace")"
     KEYCLOAK_BASE_URL="$(route_url "$KEYCLOAK_RELEASE" "$KEYCLOAK_NS" http)"
-    RHDH_VERSION="${rhdh}"
+    RHDH_VERSION="$rhdh"
     ensure_dataindex_rewrite "$namespace"
 
     backup="$(write_overlays_dotenv "$e2e")"
@@ -560,10 +577,11 @@ phase_test() {
     local pw
     pw="$(playwright_cmd "$e2e")"
     log "Playwright: ${pw} (cwd=${e2e})"
+    log "Playwright project: ${pw_project}"
     log "Playwright grep: ${SMOKE_GREP}"
     set +e
     # shellcheck disable=SC2086
-    (cd "$e2e" && $pw test --project=orchestrator --workers=1 --grep "$SMOKE_GREP" "$smoke_spec")
+    (cd "$e2e" && $pw test --project="$pw_project" --workers=1 --grep "$SMOKE_GREP" "$smoke_spec")
     rc=$?
     set -e
 

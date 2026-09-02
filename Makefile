@@ -6,7 +6,7 @@ USE_CONTAINER ?= false
 CATALOG_INDEX_TAG ?=
 RUNNER_IMAGE ?= quay.io/rhdh-community/rhdh-e2e-runner:main
 OSL_RELEASE ?=
-ORCH_NAMESPACE ?= orchestrator
+ORCH_NAMESPACE ?= orchestrator-app-next
 
 export CATALOG_INDEX_TAG
 
@@ -89,7 +89,7 @@ cleanup: ## Clean RHDH/orchestrator/OSL resources and operators from ORCH_NAMESP
 cleanup-full: ## Full cleanup: operators + related namespaces
 	./cleanup.sh --namespace $(ORCH_NAMESPACE) --include-operators --delete-namespace
 
-osl-regression: ## Cleanup + prepare OSL + deploy + 4-test smoke (VERSION, OSL_RELEASE; ORCH_NAMESPACE must be orchestrator)
+osl-regression: ## Cleanup + prepare OSL + deploy + 4-test smoke (VERSION, OSL_RELEASE; ORCH_NAMESPACE must match overlays Playwright project, default orchestrator-app-next)
 ifndef OSL_RELEASE
 	$(error OSL_RELEASE is required, e.g. make osl-regression VERSION=next OSL_RELEASE=1.39.0.CR1)
 endif

@@ -1,30 +1,14 @@
 plugins:
+  # RHDH 2.0 disables the OIDC auth backend by default; smoke signs in via
+  # Keycloak OIDC (config/app-config-oidc.yaml). quay.io/rhdh {{inherit}} has no
+  # prior entry in dynamic-plugins.default.yaml for this package (InstallException).
+  # Use the public overlays OCI pin (same approach as overlays e2e for auth).
+  - package: 'oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-plugin-auth-backend-module-oidc-provider:bs_1.52.0__0.4.17'
+    disabled: false
+  # Orchestrator 6.x colocates NFS at Scalprum PluginRoot (PageBlueprint path
+  # /orchestrator). Do not set Legacy dynamicRoutes — they 404 under app-next.
   - package: 'oci://quay.io/rhdh/red-hat-developer-hub-backstage-plugin-orchestrator:{{inherit}}'
     disabled: false
-    pluginConfig:
-      dynamicPlugins:
-        frontend:
-          red-hat-developer-hub.backstage-plugin-orchestrator:
-            # Orchestrator 6.x colocates NFS at PluginRoot (no Alpha module).
-            # RHDH next still serves packages/app unless APP_CONFIG_app_packageName=app-next.
-            # pluginModule only preloads a scalprum module; dynamicRoutes/appIcons
-            # default to PluginRoot, which does not export OrchestratorPage.
-            pluginModule: Legacy
-            appIcons:
-              - name: orchestratorIcon
-                importName: OrchestratorIcon
-                module: Legacy
-            dynamicRoutes:
-              - path: /orchestrator
-                importName: OrchestratorPage
-                module: Legacy
-                menuItem:
-                  icon: orchestratorIcon
-                  text: Orchestrator
-                  textKey: menuItem.orchestrator
-            menuItems:
-              orchestrator:
-                icon: orchestratorIcon
   - package: 'oci://quay.io/rhdh/red-hat-developer-hub-backstage-plugin-orchestrator-backend:{{inherit}}'
     disabled: false
     dependencies:

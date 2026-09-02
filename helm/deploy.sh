@@ -62,11 +62,28 @@ append_to_dynamic_plugins_cm() {
 
 if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     current_dp="$(oc get configmap dynamic-plugins --namespace "$namespace" -o jsonpath='{.data.dynamic-plugins\.yaml}' 2>/dev/null || true)"
-    if [[ "$current_dp" != *plugin-orchestrator* ]]; then
-        orch_file="config/orchestrator-dynamic-plugins.yaml"
-        if [[ "$version" == "next" || "$version" == *-CI ]]; then
-            orch_file="config/orchestrator-dynamic-plugins-next.yaml"
+    orch_file="config/orchestrator-dynamic-plugins.yaml"
+    merge_orch=false
+    if [[ "$version" == "next" || "$version" == *-CI ]]; then
+        orch_file="config/orchestrator-dynamic-plugins-next.yaml"
+        # Always ensure NFS next plugins (OIDC re-enable + orchestrator) are
+        # present. Full deploy.sh resets the ConfigMap from
+        # config/dynamic-plugins.yaml; also catch Legacy leftovers if this
+        # script is re-run alone.
+        if [[ "$current_dp" == *pluginModule:\ Legacy* ]] || [[ "$current_dp" == *OrchestratorPage* ]]; then
+            echo "Replacing Legacy orchestrator plugin wiring with NFS next config..."
+            oc create configmap dynamic-plugins \
+                --from-file=config/dynamic-plugins.yaml \
+                --namespace "$namespace" --dry-run=client -o yaml \
+                | oc apply -f - --namespace "$namespace" >/dev/null
+            merge_orch=true
+        elif [[ "$current_dp" != *auth-backend-module-oidc-provider* ]]; then
+            merge_orch=true
         fi
+    elif [[ "$current_dp" != *plugin-orchestrator* ]]; then
+        merge_orch=true
+    fi
+    if [[ "$merge_orch" == "true" ]]; then
         echo "Merging orchestrator plugins from ${orch_file} into dynamic-plugins ConfigMap..."
         append_to_dynamic_plugins_cm "$(cat "$orch_file")"
     fi
@@ -147,19 +164,9 @@ if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
     fi
 fi
 
-# New Frontend System (NFS / app-next). Off by default: RHDH next 2.0 still
-# serves packages/app unless these env vars are set, and overlay smoke locators
-# are written for the legacy shell. Set ENABLE_RHDH_NFS=1 to opt in.
-if [[ "${ENABLE_RHDH_NFS:-0}" == "1" ]]; then
-    echo "Enabling RHDH new frontend system (app-next + standard Module Federation)"
-    HELM_ARGS+=(
-        --set-string "upstream.backstage.extraEnvVars[4].name=APP_CONFIG_app_packageName"
-        --set-string "upstream.backstage.extraEnvVars[4].value=app-next"
-        --set-string "upstream.backstage.extraEnvVars[5].name=ENABLE_STANDARD_MODULE_FEDERATION"
-        --set-string "upstream.backstage.extraEnvVars[5].value=true"
-    )
-fi
-
+# NFS env for next/*-CI is set on rhdh-secrets by deploy.sh + setup-resources.sh
+# (APP_CONFIG_app_packageName / ENABLE_STANDARD_MODULE_FEDERATION) and mounted
+# via extraEnvVarsSecrets. Do not duplicate those keys as Helm extraEnvVars.
 if [[ "${IS_AUTH_ENABLED:-false}" != "true" ]]; then
     HELM_ARGS+=(
         --set "upstream.backstage.extraAppConfig[1].configMapRef=app-config-guest-auth"

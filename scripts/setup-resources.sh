@@ -34,6 +34,20 @@ ROOT_DIR="$(dirname "$DIR")"
 # Secret always has a consistent shape. Empty values are replaced by plugin
 # scripts as they configure their respective services.
 # =============================================================================
+# NFS keys on rhdh-secrets (mounted via extraEnvVarsSecrets). Required for
+# next/*-CI — overlays orchestrator e2e is NFS-only (no legacy packages/app).
+patch_nfs_secrets() {
+  if [[ "${ENABLE_RHDH_NFS:-0}" != "1" ]]; then
+    return 0
+  fi
+  oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge -p '{
+    "stringData": {
+      "APP_CONFIG_app_packageName": "app-next",
+      "ENABLE_STANDARD_MODULE_FEDERATION": "true"
+    }
+  }'
+}
+
 create_rhdh_secrets() {
   echo ""
   echo "Creating rhdh-secrets Secret..."
@@ -54,6 +68,7 @@ create_rhdh_secrets() {
         \"SONATAFLOW_DATA_INDEX_URL\": \"${SONATAFLOW_DATA_INDEX_URL:-}\"
       }
     }"
+    patch_nfs_secrets
     echo "rhdh-secrets already exists — updated URL/Keycloak/orchestrator keys."
   else
     # Generate a random session secret at deploy time so it is never hardcoded.
@@ -73,7 +88,7 @@ create_rhdh_secrets() {
       --from-literal=LIGHTHOUSE_SVC_URL="${LIGHTHOUSE_SVC_URL:-}" \
       --from-literal=SONATAFLOW_DATA_INDEX_URL="${SONATAFLOW_DATA_INDEX_URL:-}" \
       --namespace="${NAMESPACE}"
-
+    patch_nfs_secrets
     echo "rhdh-secrets created!"
   fi
 }
