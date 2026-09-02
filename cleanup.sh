@@ -18,6 +18,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/utils/shell/openshift.sh"
+
 namespace="rhdh"
 include_operators=false
 delete_namespace=false
@@ -45,17 +49,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Verify cluster connectivity
-if ! oc whoami &>/dev/null; then
-    echo "Error: Cannot connect to OpenShift cluster. Is CRC running and are you logged in?"
-    echo "  Try: crc start && oc login -u kubeadmin https://api.crc.testing:6443"
-    exit 1
-fi
+require_oc_login
 
 # Validate namespace
-if [[ ! "$namespace" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
-    echo "Error: Invalid namespace name: '$namespace' (must be lowercase alphanumeric/hyphens, 1-63 chars)"
-    exit 1
-fi
+validate_k8s_namespace "$namespace"
 
 echo "==========================================="
 echo "  RHDH / Orchestrator Cleanup"
@@ -64,6 +61,28 @@ echo "Namespace:         $namespace"
 echo "Include operators: $include_operators"
 echo "Delete namespace:  $delete_namespace"
 echo ""
+
+# Orchestrator e2e namespaces (NFS + legacy lanes) and shared Keycloak.
+RELATED_NAMESPACES=(
+    orchestrator-app-next
+    orchestrator
+    orchestrator-e2e
+    rhdh-keycloak
+)
+
+# Operator-created and mirror namespaces removed with --include-operators.
+OPERATOR_NAMESPACES=(
+    knative-serving
+    knative-eventing
+    knative-serving-ingress
+    openshift-serverless
+    openshift-serverless-logic
+    orchestrator-infra
+    orchestrator
+    orchestrator-e2e
+    rhdh-keycloak
+    osl-mirror
+)
 
 # ---------------------------------------------------------------------------
 # Helper: clean RHDH/orchestrator resources from a given namespace
@@ -188,9 +207,7 @@ post_cleanup_verify() {
     echo "--- Post-clean verification ---"
 
     if [[ "$include_operators" == "true" ]]; then
-        for ns in knative-serving knative-eventing knative-serving-ingress \
-                  openshift-serverless openshift-serverless-logic orchestrator-infra \
-                  orchestrator orchestrator-e2e rhdh-keycloak osl-mirror; do
+        for ns in "${OPERATOR_NAMESPACES[@]}"; do
             if oc get namespace "$ns" &>/dev/null; then
                 echo "  Remaining namespace: $ns"
                 failures=1
@@ -254,21 +271,12 @@ helm uninstall orch-infra -n orchestrator-infra 2>/dev/null || true
 # ---------------------------------------------------------------------------
 # 2. Clean namespaces created by orchestrator e2e tests
 #    (rhdh-plugin-export-overlays/workspaces/orchestrator/e2e-tests)
-#    Tests deploy into "orchestrator-app-next" (NFS) or older "orchestrator" /
-#    "orchestrator-e2e" namespaces, and Keycloak into "rhdh-keycloak".
 # ---------------------------------------------------------------------------
-if [[ "$namespace" != "orchestrator-app-next" ]]; then
-    clean_namespace "orchestrator-app-next"
-fi
-if [[ "$namespace" != "orchestrator" ]]; then
-    clean_namespace "orchestrator"
-fi
-if [[ "$namespace" != "orchestrator-e2e" ]]; then
-    clean_namespace "orchestrator-e2e"
-fi
-if [[ "$namespace" != "rhdh-keycloak" ]]; then
-    clean_namespace "rhdh-keycloak"
-fi
+for ns in "${RELATED_NAMESPACES[@]}"; do
+    if [[ "$namespace" != "$ns" ]]; then
+        clean_namespace "$ns"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # 3. Cluster-scoped: operators and related resources
@@ -298,9 +306,7 @@ if [[ "$include_operators" == "true" ]]; then
 
     # All related namespaces (operator-created + alternative deployment patterns)
     echo "--- Removing operator and related namespaces ---"
-    for ns in knative-serving knative-eventing knative-serving-ingress \
-              openshift-serverless openshift-serverless-logic orchestrator-infra \
-              orchestrator orchestrator-e2e rhdh-keycloak osl-mirror; do
+    for ns in "${OPERATOR_NAMESPACES[@]}"; do
         oc delete project "$ns" --ignore-not-found --timeout=60s 2>/dev/null || true
         wait_for_namespace_gone "$ns" 120
     done

@@ -7,48 +7,13 @@ command -v oc >/dev/null 2>&1 || { echo "Error: oc (OpenShift CLI) is required b
 
 NAMESPACE=${1:-rhdh-keycloak}
 KEYCLOAK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${KEYCLOAK_DIR}/lib.sh"
 USERS_FILE=${2:-"${KEYCLOAK_DIR}/users.json"}
 GROUPS_FILE=${3:-"${KEYCLOAK_DIR}/groups.json"}
 CLIENT_FILE="${KEYCLOAK_DIR}/rhdh-client.json"
 KEYCLOAK_RELEASE_NAME="keycloak"
 KEYCLOAK_VALUES="${KEYCLOAK_DIR}/keycloak-values.yaml"
-
-# Helper function for API calls with error checking
-api_call() {
-  local method=$1
-  local url=$2
-  local data=$3
-  local description=$4
-
-  if [ -n "$data" ]; then
-    RESPONSE=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
-      -H "Authorization: Bearer $ADMIN_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "$data")
-  else
-    RESPONSE=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
-      -H "Authorization: Bearer $ADMIN_TOKEN" \
-      -H "Content-Type: application/json")
-  fi
-
-  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-  BODY=$(echo "$RESPONSE" | sed '$d')
-
-  if [ "$method" = "GET" ] || [ "$HTTP_CODE" -lt 400 ]; then
-    echo "$BODY"
-    return 0
-  fi
-
-  # 409 Conflict is acceptable for create operations (already exists)
-  if [ "$HTTP_CODE" = "409" ]; then
-    echo "Warning: $description - already exists (continuing)" >&2
-    echo "$BODY"
-    return 0
-  fi
-
-  echo "Error: $description failed (HTTP $HTTP_CODE): $BODY" >&2
-  return 1
-}
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
   echo "Error: run $0; do not source it (see update-rhdh-client-redirects.sh for redirects)" >&2
@@ -77,12 +42,7 @@ helm upgrade --install $KEYCLOAK_RELEASE_NAME bitnami/keycloak \
 echo "Waiting for Keycloak rollout..."
 oc rollout status statefulset/keycloak -n $NAMESPACE --timeout=5m
 
-# Detect TLS based on cluster route configuration
-if oc get route console -n openshift-console -o=jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
-    KEYCLOAK_PROTOCOL="https"
-else
-    KEYCLOAK_PROTOCOL="http"
-fi
+KEYCLOAK_PROTOCOL="$(keycloak_console_protocol)"
 
 # Create OpenShift Route
 echo "Creating OpenShift Route (protocol: $KEYCLOAK_PROTOCOL)..."
@@ -129,8 +89,9 @@ spec:
 EOF
 fi
 
-KEYCLOAK_URL="${KEYCLOAK_PROTOCOL}://$(oc get route keycloak -n $NAMESPACE -o jsonpath='{.spec.host}')"
-[ -z "$KEYCLOAK_URL" ] || [ "$KEYCLOAK_URL" = "${KEYCLOAK_PROTOCOL}://" ] && echo "Error: Failed to get Keycloak route" && exit 1
+KEYCLOAK_URL="$(keycloak_route_url "$NAMESPACE" "$KEYCLOAK_RELEASE_NAME")" || {
+  echo "Error: Failed to get Keycloak route" && exit 1
+}
 echo "Keycloak URL: $KEYCLOAK_URL"
 
 # Wait for Keycloak API to be ready (check for HTTP 200, not just connection)
@@ -151,41 +112,34 @@ while true; do
   echo "  Waiting... (status: $HTTP_STATUS)"
 done
 
-# Get admin token
-TOKEN_RESPONSE=$(curl -sk -w "\n%{http_code}" -X POST "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
-  -d "username=admin&password=admin123&grant_type=password&client_id=admin-cli")
-TOKEN_HTTP_CODE=$(echo "$TOKEN_RESPONSE" | tail -1)
-TOKEN_BODY=$(echo "$TOKEN_RESPONSE" | sed '$d')
-[ "$TOKEN_HTTP_CODE" -ge 400 ] && echo "Error: Failed to get admin token (HTTP $TOKEN_HTTP_CODE): $TOKEN_BODY" && exit 1
-ADMIN_TOKEN=$(echo "$TOKEN_BODY" | jq -r '.access_token // empty')
-[ -z "$ADMIN_TOKEN" ] && echo "Error: Failed to parse admin token" && exit 1
+ADMIN_TOKEN="$(keycloak_admin_token "$KEYCLOAK_URL")"
 
 # Create realm and client
 echo "Creating realm 'rhdh'..."
-api_call POST "$KEYCLOAK_URL/admin/realms" \
+keycloak_api_call POST "$KEYCLOAK_URL/admin/realms" \
   '{"realm":"rhdh","enabled":true,"displayName":"RHDH Realm"}' \
   "Create realm" >/dev/null
 
 echo "Creating client..."
-api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/clients" \
+keycloak_api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/clients" \
   "$(jq -c '.' "$CLIENT_FILE")" \
   "Create client" >/dev/null
 
 # Get IDs for role assignment
-SERVICE_ACCOUNT_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/users?username=service-account-rhdh-client" "" "Get service account" | \
+SERVICE_ACCOUNT_ID=$(keycloak_api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/users?username=service-account-rhdh-client" "" "Get service account" | \
   jq -r '.[0].id // empty')
 [ -z "$SERVICE_ACCOUNT_ID" ] && echo "Error: Service account not found" && exit 1
 
-REALM_MGMT_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients?clientId=realm-management" "" "Get realm-management client" | \
+REALM_MGMT_ID=$(keycloak_api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients?clientId=realm-management" "" "Get realm-management client" | \
   jq -r '.[0].id // empty')
 [ -z "$REALM_MGMT_ID" ] && echo "Error: realm-management client not found" && exit 1
 
-ROLES=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$REALM_MGMT_ID/roles" "" "Get roles" | \
+ROLES=$(keycloak_api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/clients/$REALM_MGMT_ID/roles" "" "Get roles" | \
   jq -c '[.[] | select(.name == "view-authorization" or .name == "manage-authorization" or .name == "view-users")]')
 [ -z "$ROLES" ] || [ "$ROLES" = "[]" ] && echo "Error: Required roles not found" && exit 1
 
 echo "Assigning service account roles..."
-api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/users/$SERVICE_ACCOUNT_ID/role-mappings/clients/$REALM_MGMT_ID" \
+keycloak_api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/users/$SERVICE_ACCOUNT_ID/role-mappings/clients/$REALM_MGMT_ID" \
   "$ROLES" \
   "Assign roles" >/dev/null
 
@@ -193,7 +147,7 @@ api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/users/$SERVICE_ACCOUNT_ID/role-ma
 if [ -f "$GROUPS_FILE" ]; then
   echo "Creating groups..."
   jq -r '.[].name' "$GROUPS_FILE" | while read -r group; do
-    api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/groups" \
+    keycloak_api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/groups" \
       "{\"name\":\"$group\"}" \
       "Create group '$group'" >/dev/null && echo "  Created group: $group" || echo "  Warning: Failed to create group: $group"
   done
@@ -208,7 +162,7 @@ if [ -f "$USERS_FILE" ]; then
     groups=$(echo "$user_json" | jq -r '.groups // [] | join(",")')
     user_payload=$(echo "$user_json" | jq -c 'del(.groups)')
 
-    if ! api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/users" "$user_payload" "Create user '$username'" >/dev/null; then
+    if ! keycloak_api_call POST "$KEYCLOAK_URL/admin/realms/rhdh/users" "$user_payload" "Create user '$username'" >/dev/null; then
       echo "  Warning: Failed to create user: $username"
       continue
     fi
@@ -216,15 +170,15 @@ if [ -f "$USERS_FILE" ]; then
 
     # Add user to groups
     if [ -n "$groups" ]; then
-      USER_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/users?username=$username" "" "Get user ID" | \
+      USER_ID=$(keycloak_api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/users?username=$username" "" "Get user ID" | \
         jq -r '.[0].id // empty')
       [ -z "$USER_ID" ] && echo "    Warning: Could not get user ID, skipping groups" && continue
 
       for group in $(echo "$groups" | tr ',' ' '); do
-        GROUP_ID=$(api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/groups?search=$group" "" "Get group ID" | \
+        GROUP_ID=$(keycloak_api_call GET "$KEYCLOAK_URL/admin/realms/rhdh/groups?search=$group" "" "Get group ID" | \
           jq -r '.[0].id // empty')
         [ -z "$GROUP_ID" ] && echo "    Warning: Group '$group' not found" && continue
-        api_call PUT "$KEYCLOAK_URL/admin/realms/rhdh/users/$USER_ID/groups/$GROUP_ID" "" "Add to group" >/dev/null \
+        keycloak_api_call PUT "$KEYCLOAK_URL/admin/realms/rhdh/users/$USER_ID/groups/$GROUP_ID" "" "Add to group" >/dev/null \
           && echo "    Added to group: $group" || echo "    Warning: Failed to add to group: $group"
       done
     fi

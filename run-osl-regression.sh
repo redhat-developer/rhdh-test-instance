@@ -13,10 +13,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_git_common="$(cd "$SCRIPT_DIR" && git rev-parse --git-common-dir 2>/dev/null)"
-_main_repo_root="$(cd "$SCRIPT_DIR" && cd "$_git_common/.." 2>/dev/null && pwd)"
-WORKSPACE_DIR="$(dirname "${_main_repo_root:-$SCRIPT_DIR}")"
-unset _git_common _main_repo_root
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/utils/shell/common.sh"
+source "${SCRIPT_DIR}/utils/shell/workspace.sh"
+source "${SCRIPT_DIR}/utils/shell/openshift.sh"
+WORKSPACE_DIR="$(resolve_workspace_dir "$SCRIPT_DIR")"
 
 DEFAULT_OVERLAYS="${WORKSPACE_DIR}/rhdh-plugin-export-overlays"
 KEYCLOAK_NS="rhdh-keycloak"
@@ -66,13 +67,6 @@ Options:
                                 ALLOW_RELATIVE_SERVICE_URL=1
   -h, --help                    Show this help
 EOF
-}
-
-log() { echo "==> $*"; }
-die() { echo "Error: $*" >&2; exit 1; }
-
-require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -137,7 +131,7 @@ preflight() {
     require_cmd oc
     require_cmd helm
     require_cmd jq
-    oc whoami >/dev/null 2>&1 || die "oc whoami failed; log into a cluster first"
+    require_oc_login "oc whoami failed; log into a cluster first"
 
     if [[ "$run_prepare" == "true" ]]; then
         require_cmd podman
@@ -166,30 +160,6 @@ preflight() {
             die "yarn or corepack is required for --test"
         fi
     fi
-}
-
-cluster_router_base() {
-    local domain
-    domain="$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}' 2>/dev/null || true)"
-    if [[ -n "$domain" ]]; then
-        echo "$domain"
-        return
-    fi
-    local host
-    host="$(oc get route console -n openshift-console -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-    [[ "$host" == *.* ]] || die "could not discover cluster router base"
-    echo "${host#*.}"
-}
-
-route_url() {
-    local name="$1" ns="$2" default_scheme="${3:-https}"
-    local host tls scheme
-    host="$(oc get route "$name" -n "$ns" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-    [[ -n "$host" ]] || die "route $name in $ns has no host"
-    tls="$(oc get route "$name" -n "$ns" -o jsonpath='{.spec.tls.termination}' 2>/dev/null || true)"
-    scheme="$default_scheme"
-    [[ -n "$tls" ]] && scheme="https"
-    echo "${scheme}://${host}"
 }
 
 ensure_e2e_deps() {
@@ -221,6 +191,22 @@ playwright_cmd() {
     echo "yarn playwright"
 }
 
+populate_osl_playwright_env() {
+    export K8S_CLUSTER_ROUTER_BASE="$(openshift_cluster_router_base)"
+    export RHDH_BASE_URL="$(openshift_route_url "$RHDH_RELEASE" "$namespace")"
+    export KEYCLOAK_BASE_URL="$(openshift_route_url "$KEYCLOAK_RELEASE" "$KEYCLOAK_NS" http)"
+    export RHDH_VERSION="$rhdh"
+    export SKIP_KEYCLOAK_DEPLOYMENT=true
+    export SKIP_OPERATOR_INSTALLATION=true
+    export NAME_SPACE="$namespace"
+    export GH_USER_ID=test1
+    export GH_USER_PASS=test1@123
+    export KEYCLOAK_REALM=rhdh
+    export KEYCLOAK_LOGIN_REALM=rhdh
+    export KEYCLOAK_CLIENT_ID=rhdh-client
+    export KEYCLOAK_CLIENT_SECRET=rhdh-client-secret
+}
+
 write_overlays_dotenv() {
     local e2e="$1"
     local path="${e2e}/.env"
@@ -233,16 +219,16 @@ write_overlays_dotenv() {
 K8S_CLUSTER_ROUTER_BASE=${K8S_CLUSTER_ROUTER_BASE}
 RHDH_BASE_URL=${RHDH_BASE_URL}
 RHDH_VERSION=${RHDH_VERSION:-}
-NAME_SPACE=${namespace}
-SKIP_KEYCLOAK_DEPLOYMENT=true
-SKIP_OPERATOR_INSTALLATION=true
-GH_USER_ID=test1
-GH_USER_PASS=test1@123
+NAME_SPACE=${NAME_SPACE}
+SKIP_KEYCLOAK_DEPLOYMENT=${SKIP_KEYCLOAK_DEPLOYMENT}
+SKIP_OPERATOR_INSTALLATION=${SKIP_OPERATOR_INSTALLATION}
+GH_USER_ID=${GH_USER_ID}
+GH_USER_PASS=${GH_USER_PASS}
 KEYCLOAK_BASE_URL=${KEYCLOAK_BASE_URL}
-KEYCLOAK_REALM=rhdh
-KEYCLOAK_LOGIN_REALM=rhdh
-KEYCLOAK_CLIENT_ID=rhdh-client
-KEYCLOAK_CLIENT_SECRET=rhdh-client-secret
+KEYCLOAK_REALM=${KEYCLOAK_REALM}
+KEYCLOAK_LOGIN_REALM=${KEYCLOAK_LOGIN_REALM}
+KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID}
+KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET}
 EOF
     echo "$backup"
 }
@@ -275,52 +261,12 @@ phase_prepare() {
     "${SCRIPT_DIR}/prepare-osl-internal.sh" "${args[@]}"
 }
 
-ensure_dataindex_rewrite() {
-    local ns="$1"
-    "${SCRIPT_DIR}/utils/orchestrator/ensure-dataindex-rewrite.sh" "$ns"
-}
-
-probe_dataindex() {
-    local ns="$1" allow="$2"
-    local body url json count problems
-    body='{"query":"{ ProcessDefinitions { id serviceUrl endpoint } }"}'
-    url="http://osl-di-rewrite.${ns}.svc.cluster.local/graphql"
-    log "probing Data Index GraphQL via osl-di-rewrite ProcessDefinitions.serviceUrl"
-    json="$(oc exec -n "$ns" deploy/redhat-developer-hub -- \
-        curl -sS -X POST -H "Content-Type: application/json" -d "$body" "$url")" \
-        || die "oc exec curl of Data Index GraphQL (osl-di-rewrite) failed"
-    if ! printf '%s' "$json" | jq -e . >/dev/null 2>&1; then
-        die "Data Index did not return JSON: ${json:0:500}"
-    fi
-    if printf '%s' "$json" | jq -e '.errors != null and (.errors | length) > 0' >/dev/null; then
-        printf '%s\n' "$json" | jq '.errors' >&2
-        die "Data Index GraphQL returned errors"
-    fi
-    count="$(printf '%s' "$json" | jq '.data.ProcessDefinitions | length // 0')"
-    if [[ "$count" -eq 0 ]]; then
-        printf '%s\n' '{"ok":false,"problems":[{"id":null,"serviceUrl":null,"endpoint":null,"reason":"no-process-definitions"}]}' >&2
-        exit 1
-    fi
-    problems="$(printf '%s' "$json" | jq '[.data.ProcessDefinitions[] | select((.serviceUrl | type != "string") or ((.serviceUrl | startswith("http://") or startswith("https://")) | not)) | {id, serviceUrl, endpoint, reason: "relative-or-missing-serviceUrl"}]')"
-    if [[ "$(printf '%s' "$problems" | jq 'length')" -gt 0 ]]; then
-        printf '%s\n' "$problems" | jq '{ok:false, problems:.}' >&2
-        if [[ "$allow" == "true" ]]; then
-            log "WARNING: relative/missing serviceUrl allowed by ALLOW_RELATIVE_SERVICE_URL"
-            return 0
-        fi
-        exit 2
-    fi
-    printf '%s\n' '{"ok":true,"problems":[]}' >&2
-}
-
 phase_deploy() {
     log "[deploy] RHDH ${rhdh} namespace=${namespace}"
     if [[ -f "${SCRIPT_DIR}/.env.osl" ]]; then
         # shellcheck disable=SC1091
         source "${SCRIPT_DIR}/.env.osl"
     fi
-    # NFS env for next/*-CI is set inside deploy.sh before secrets/Helm.
-    # Data Index rewrite is installed by setup-orchestrator.sh after Helm.
     POST_SETUP_WORKFLOW_SMOKE=0 \
         SKIP_EMPTY_BASELINE=1 \
         ALLOW_OSL_SERVERLESS_VERSION_SKEW=1 \
@@ -338,21 +284,8 @@ phase_test() {
     fi
     ensure_e2e_deps "$e2e"
 
-    export K8S_CLUSTER_ROUTER_BASE RHDH_BASE_URL KEYCLOAK_BASE_URL RHDH_VERSION
-    export SKIP_KEYCLOAK_DEPLOYMENT=true
-    export SKIP_OPERATOR_INSTALLATION=true
-    export NAME_SPACE="$namespace"
-    export GH_USER_ID=test1
-    export GH_USER_PASS=test1@123
-    export KEYCLOAK_REALM=rhdh
-    export KEYCLOAK_LOGIN_REALM=rhdh
-    export KEYCLOAK_CLIENT_ID=rhdh-client
-    export KEYCLOAK_CLIENT_SECRET=rhdh-client-secret
-    K8S_CLUSTER_ROUTER_BASE="$(cluster_router_base)"
-    RHDH_BASE_URL="$(route_url "$RHDH_RELEASE" "$namespace")"
-    KEYCLOAK_BASE_URL="$(route_url "$KEYCLOAK_RELEASE" "$KEYCLOAK_NS" http)"
-    RHDH_VERSION="$rhdh"
-    ensure_dataindex_rewrite "$namespace"
+    populate_osl_playwright_env
+    "${SCRIPT_DIR}/utils/orchestrator/ensure-dataindex-rewrite.sh" "$namespace"
 
     backup="$(write_overlays_dotenv "$e2e")"
     cleanup_test_artifacts() {
@@ -367,7 +300,7 @@ phase_test() {
     if [[ "$allow_relative_service_url" == "true" || "${ALLOW_RELATIVE_SERVICE_URL:-}" == "1" ]]; then
         allow_relative=true
     fi
-    probe_dataindex "$namespace" "$allow_relative"
+    bash "${SCRIPT_DIR}/utils/orchestrator/probe-dataindex-rewrite.sh" "$namespace" "$allow_relative"
     smoke_spec="${e2e}/tests/${SMOKE_WRAPPER_NAME}"
     cp -a "$SMOKE_WRAPPER_SRC" "$smoke_spec"
 

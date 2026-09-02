@@ -23,6 +23,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/utils/shell/common.sh"
+source "${SCRIPT_DIR}/utils/shell/openshift.sh"
+
 RELEASES_DIR="${SCRIPT_DIR}/config/osl-releases"
 ENV_OSL_FILE="${SCRIPT_DIR}/.env.osl"
 
@@ -66,18 +70,6 @@ Options:
   --multi-arch                  Mirror all architectures (default: amd64 only)
   -h, --help                    Show this help
 EOF
-}
-
-log() { echo "==> $*"; }
-
-die() { echo "Error: $*" >&2; exit 1; }
-
-require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
-}
-
-ensure_cluster_access() {
-    oc whoami >/dev/null 2>&1 || die "Cannot reach OpenShift cluster. Run: oc login <cluster-api>"
 }
 
 detect_ocp_minor() {
@@ -413,7 +405,7 @@ for cmd in oc podman skopeo jq; do
     require_cmd "$cmd"
 done
 
-ensure_cluster_access
+require_oc_login "Cannot reach OpenShift cluster. Run: oc login <cluster-api>"
 
 [[ -z "$ocp_minor" ]] && ocp_minor="$(detect_ocp_minor)"
 [[ "$ocp_minor" =~ ^[0-9]+\.[0-9]+$ ]] || die "invalid --ocp-minor '$ocp_minor' (expected e.g. 4.17)"

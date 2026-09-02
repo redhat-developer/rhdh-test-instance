@@ -78,7 +78,7 @@ prepare-osl: ## Mirror pre-release OSL images (OSL_RELEASE=1.39.0.CR1)
 ifndef OSL_RELEASE
 	$(error OSL_RELEASE is required, e.g. make prepare-osl OSL_RELEASE=1.39.0.CR1)
 endif
-	./prepare-osl-internal.sh --release $(OSL_RELEASE)
+	./prepare-osl-internal.sh --release $(OSL_RELEASE) --namespace $(ORCH_NAMESPACE)
 
 setup-orchestrator: ## Full RHDH + orchestrator setup (VERSION, ORCH_NAMESPACE, OSL_RELEASE)
 	./setup-orchestrator.sh $(VERSION) --namespace $(ORCH_NAMESPACE) $(if $(filter-out ,$(OSL_RELEASE)),--prepare-internal-osl $(OSL_RELEASE))

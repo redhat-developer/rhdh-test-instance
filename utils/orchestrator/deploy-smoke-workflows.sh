@@ -6,8 +6,9 @@
 #
 set -euo pipefail
 
-log() { echo "==> $*"; }
-die() { echo "Error: $*" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/utils/shell/common.sh"
 
 ns="${1:-}"
 [[ -n "$ns" ]] || die "namespace required"

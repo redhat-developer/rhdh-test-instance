@@ -30,15 +30,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Resolve the parent workspace directory: the main repo root's parent, even from a worktree.
-_git_common="$(cd "$SCRIPT_DIR" && git rev-parse --git-common-dir 2>/dev/null)"
-_main_repo_root="$(cd "$SCRIPT_DIR" && cd "$_git_common/.." 2>/dev/null && pwd)"
-WORKSPACE_DIR="$(dirname "${_main_repo_root:-$SCRIPT_DIR}")"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/utils/shell/common.sh"
+source "${SCRIPT_DIR}/utils/shell/workspace.sh"
+source "${SCRIPT_DIR}/utils/shell/openshift.sh"
+source "${SCRIPT_DIR}/utils/keycloak/lib.sh"
+source "${SCRIPT_DIR}/utils/orchestrator/assert-osl-operators.sh"
+WORKSPACE_DIR="$(resolve_workspace_dir "$SCRIPT_DIR")"
 RHDH_E2E_TEST_UTILS_DIR="${RHDH_E2E_TEST_UTILS_DIR:-${WORKSPACE_DIR}/rhdh-e2e-test-utils}"
-unset _git_common _main_repo_root
 SHARED_INSTALL_SCRIPT="${RHDH_E2E_TEST_UTILS_DIR}/dist/deployment/orchestrator/install-orchestrator.sh"
-LOCAL_VERIFY_EXISTING_RHDH_SCRIPT="${SCRIPT_DIR}/utils/orchestrator/verify-existing-rhdh.sh"
-SHARED_VERIFY_EXISTING_RHDH_SCRIPT="${SHARED_VERIFY_EXISTING_RHDH_SCRIPT:-$LOCAL_VERIFY_EXISTING_RHDH_SCRIPT}"
+SHARED_VERIFY_EXISTING_RHDH_SCRIPT="${SHARED_VERIFY_EXISTING_RHDH_SCRIPT:-${RHDH_E2E_TEST_UTILS_DIR}/dist/deployment/orchestrator/verify-existing-rhdh.sh}"
 KEYCLOAK_NAMESPACE="${KEYCLOAK_NAMESPACE:-rhdh-keycloak}"
 
 # ── Argument parsing ─────────────────────────────────────────────────────────
@@ -81,16 +82,8 @@ cd "$SCRIPT_DIR"
 
 # ── Validate inputs ──────────────────────────────────────────────────────────
 
-if ! oc whoami &>/dev/null; then
-    echo "Error: Cannot connect to OpenShift cluster. Is CRC running and are you logged in?"
-    echo "  Try: crc start && oc login -u kubeadmin https://api.crc.testing:6443"
-    exit 1
-fi
-
-if [[ ! "$namespace" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
-    echo "Error: Invalid namespace name: '$namespace' (must be lowercase alphanumeric/hyphens, 1-63 chars)"
-    exit 1
-fi
+require_oc_login
+validate_k8s_namespace "$namespace"
 
 assert_empty_baseline() {
     local ns="$1"
@@ -160,7 +153,6 @@ assert_empty_baseline() {
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-log() { echo "==> $*"; }
 log_debug() { echo "[DEBUG $(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
 phase_checkpoint() { echo "[CHECKPOINT] $*"; }
 
@@ -174,7 +166,7 @@ emit_diag_hints() {
 }
 
 ensure_shared_scripts() {
-    if [[ ! -x "$SHARED_INSTALL_SCRIPT" ]]; then
+    if [[ ! -x "$SHARED_INSTALL_SCRIPT" || ! -x "$SHARED_VERIFY_EXISTING_RHDH_SCRIPT" ]]; then
         if [[ -f "${RHDH_E2E_TEST_UTILS_DIR}/package.json" ]]; then
             log "Building shared rhdh-e2e-test-utils artifacts..."
             (cd "$RHDH_E2E_TEST_UTILS_DIR" && yarn build >/dev/null)
@@ -186,7 +178,7 @@ ensure_shared_scripts() {
     fi
     if [[ ! -x "$SHARED_VERIFY_EXISTING_RHDH_SCRIPT" ]]; then
         echo "Error: Existing-RHDH verification script not found or not executable: $SHARED_VERIFY_EXISTING_RHDH_SCRIPT"
-        echo "Hint: set SHARED_VERIFY_EXISTING_RHDH_SCRIPT to override, or use the local default script."
+        echo "Hint: set SHARED_VERIFY_EXISTING_RHDH_SCRIPT to override, or build rhdh-e2e-test-utils (yarn build)."
         exit 1
     fi
     log "Using existing-RHDH verification script: $SHARED_VERIFY_EXISTING_RHDH_SCRIPT"
@@ -214,148 +206,8 @@ run_shared_orchestrator_install() {
     phase_checkpoint "shared-orchestrator-installed"
 }
 
-extract_major_minor() {
-    local version="$1"
-    echo "$version" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/'
-}
-
-get_subscription_field() {
-    local name="$1" field="$2"
-    oc get subscriptions.operators.coreos.com "$name" -n openshift-operators -o "jsonpath={.spec.${field}}" 2>/dev/null || true
-}
-
-get_operator_csv_name() {
-    local package="$1"
-    local csv_name
-    csv_name="$(oc get csv -n openshift-operators -l "operators.coreos.com/${package}.openshift-operators" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    if [[ -z "$csv_name" && "$package" == "logic-operator" ]]; then
-        csv_name="$(oc get csv -n openshift-operators -l "operators.coreos.com/logic-operator-rhel8.openshift-operators" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
-    fi
-    echo "$csv_name"
-}
-
-get_operator_csv_version() {
-    local package="$1"
-    local csv_name
-    csv_name="$(get_operator_csv_name "$package")"
-    [[ -z "$csv_name" ]] && { echo ""; return 0; }
-    oc get csv "$csv_name" -n openshift-operators -o jsonpath='{.spec.version}' 2>/dev/null || true
-}
-
-assert_operator_configuration() {
-    local package="$1" sub_name="$2" expected_channel="$3" expected_source="$4" expected_source_ns="$5" expected_starting_csv="$6"
-    local actual_channel actual_source actual_source_ns actual_starting_csv
-    actual_channel="$(get_subscription_field "$sub_name" channel)"
-    actual_source="$(get_subscription_field "$sub_name" source)"
-    actual_source_ns="$(get_subscription_field "$sub_name" sourceNamespace)"
-    actual_starting_csv="$(get_subscription_field "$sub_name" startingCSV)"
-
-    if [[ -n "$expected_channel" && "$actual_channel" != "$expected_channel" ]]; then
-        echo "Error: ${package} channel mismatch. expected='${expected_channel}' actual='${actual_channel}'"
-        exit 1
-    fi
-    if [[ -n "$expected_source" && "$actual_source" != "$expected_source" ]]; then
-        echo "Error: ${package} source mismatch. expected='${expected_source}' actual='${actual_source}'"
-        exit 1
-    fi
-    if [[ -n "$expected_source_ns" && "$actual_source_ns" != "$expected_source_ns" ]]; then
-        echo "Error: ${package} source namespace mismatch. expected='${expected_source_ns}' actual='${actual_source_ns}'"
-        exit 1
-    fi
-    if [[ -n "$expected_starting_csv" && "$actual_starting_csv" != "$expected_starting_csv" ]]; then
-        echo "Error: ${package} startingCSV mismatch. expected='${expected_starting_csv}' actual='${actual_starting_csv}'"
-        exit 1
-    fi
-}
-
-assert_pre_release_install_state() {
-    local expected_logic_source="${OSL_CATALOG_SOURCE:-${OSL_LOGIC_SOURCE:-}}"
-    local expected_logic_source_ns="${OSL_LOGIC_SOURCE_NAMESPACE:-openshift-marketplace}"
-    local expected_logic_channel="${OSL_LOGIC_CHANNEL:-stable}"
-    local expected_logic_csv="${OSL_LOGIC_CSV:-}"
-
-    local expected_serverless_source="${OSL_SERVERLESS_SOURCE:-redhat-operators}"
-    local expected_serverless_source_ns="${OSL_SERVERLESS_SOURCE_NAMESPACE:-openshift-marketplace}"
-    local expected_serverless_channel="${OSL_SERVERLESS_CHANNEL:-stable}"
-
-    log "Asserting installed operator subscriptions and versions..."
-    assert_operator_configuration "logic-operator" "logic-operator" "$expected_logic_channel" "$expected_logic_source" "$expected_logic_source_ns" "$expected_logic_csv"
-    assert_operator_configuration "serverless-operator" "serverless-operator" "$expected_serverless_channel" "$expected_serverless_source" "$expected_serverless_source_ns" ""
-
-    local logic_csv logic_version serverless_version logic_mm serverless_mm
-    logic_csv="$(get_operator_csv_name "logic-operator")"
-    logic_version="$(get_operator_csv_version "logic-operator")"
-    serverless_version="$(get_operator_csv_version "serverless-operator")"
-
-    if [[ -z "$logic_csv" || -z "$logic_version" ]]; then
-        echo "Error: Unable to resolve installed logic-operator CSV/version."
-        exit 1
-    fi
-
-    if [[ -n "${OSL_VERSION:-}" ]]; then
-        local osl_marker
-        osl_marker="$(echo "${OSL_VERSION}" | tr '[:upper:]' '[:lower:]')"
-        local csv_lc version_lc
-        csv_lc="$(echo "${logic_csv}" | tr '[:upper:]' '[:lower:]')"
-        version_lc="$(echo "${logic_version}" | tr '[:upper:]' '[:lower:]')"
-        if [[ "$osl_marker" == *"cr"* || "$osl_marker" == *"rc"* ]]; then
-            # Some pre-release catalogs publish a GA-looking CSV/version while still being
-            # sourced from a pre-release catalog and pinned startingCSV; accept that case.
-            if [[ "$csv_lc" != *"cr"* && "$csv_lc" != *"rc"* && "$version_lc" != *"cr"* && "$version_lc" != *"rc"* ]]; then
-                if [[ -n "${expected_logic_csv:-}" && "$logic_csv" == "$expected_logic_csv" ]]; then
-                    log "Pre-release marker not present in CSV/version; accepted because installed CSV matches expected startingCSV (${expected_logic_csv})."
-                else
-                    echo "Error: Expected pre-release OSL marker in installed logic-operator CSV/version. csv='${logic_csv}' version='${logic_version}'"
-                    exit 1
-                fi
-            fi
-        fi
-    fi
-
-    logic_mm="$(extract_major_minor "$logic_version")"
-    serverless_mm="$(extract_major_minor "$serverless_version")"
-    if [[ -n "$logic_mm" && -n "$serverless_mm" && "$logic_mm" != "$serverless_mm" ]]; then
-        if [[ "${ALLOW_OSL_SERVERLESS_VERSION_SKEW:-0}" != "1" ]]; then
-            echo "Error: Serverless/Logic major.minor mismatch (serverless=${serverless_mm}, logic=${logic_mm}). Set ALLOW_OSL_SERVERLESS_VERSION_SKEW=1 to override."
-            exit 1
-        fi
-        echo "Warning: Serverless/Logic major.minor mismatch allowed by ALLOW_OSL_SERVERLESS_VERSION_SKEW=1 (serverless=${serverless_mm}, logic=${logic_mm})."
-    fi
-
-    log "Installed logic-operator CSV: ${logic_csv} (version=${logic_version})"
-    log "Installed serverless-operator version: ${serverless_version:-unknown}"
-    phase_checkpoint "operator-configuration-asserted"
-}
-
 prepare_keycloak() {
     bash "$SCRIPT_DIR/utils/keycloak/keycloak-deploy.sh" "$KEYCLOAK_NAMESPACE"
-}
-
-sync_keycloak_runtime_env() {
-    local keycloak_host keycloak_proto
-    keycloak_host="$(oc get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-    if [[ -z "$keycloak_host" ]]; then
-        echo "Error: could not resolve Keycloak route in namespace '$KEYCLOAK_NAMESPACE'."
-        exit 1
-    fi
-
-    if [[ -z "${KEYCLOAK_BASE_URL:-}" ]]; then
-        keycloak_proto="http"
-        if oc get route keycloak -n "$KEYCLOAK_NAMESPACE" -o jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
-            keycloak_proto="https"
-        fi
-        export KEYCLOAK_BASE_URL="${keycloak_proto}://${keycloak_host}"
-    fi
-    export KEYCLOAK_METADATA_URL="${KEYCLOAK_BASE_URL}/realms/rhdh"
-    export KEYCLOAK_REALM="${KEYCLOAK_REALM:-rhdh}"
-    export KEYCLOAK_LOGIN_REALM="${KEYCLOAK_LOGIN_REALM:-${KEYCLOAK_REALM}}"
-    export KEYCLOAK_CLIENT_ID="${KEYCLOAK_CLIENT_ID:-rhdh-client}"
-    export KEYCLOAK_CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET:-rhdh-client-secret}"
-
-    if [[ -z "${KEYCLOAK_LOGIN_REALM}" ]]; then
-        echo "Error: KEYCLOAK_LOGIN_REALM resolved to empty value."
-        exit 1
-    fi
 }
 
 verify_shared_existing_rhdh_contract() {
@@ -373,30 +225,12 @@ if [[ -f "${SCRIPT_DIR}/.env.osl" ]]; then
 fi
 assert_empty_baseline "$namespace" "$KEYCLOAK_NAMESPACE"
 
-route_scheme() {
-    local name="$1" ns="$2"
-    if oc get route "$name" -n "$ns" -o jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
-        echo https
-    else
-        echo http
-    fi
-}
-
-rhdh_public_url() {
-    local ns="$1"
-    local host scheme
-    host="$(oc get route redhat-developer-hub -n "$ns" -o jsonpath='{.spec.host}' 2>/dev/null || true)"
-    [[ -n "$host" ]] || return 1
-    scheme="$(route_scheme redhat-developer-hub "$ns")"
-    echo "${scheme}://${host}"
-}
-
 wait_for_rhdh_auth_and_orchestrator_ready() {
     local ns="$1"
     local timeout_secs="${2:-240}"
     local start_time rhdh_url
     start_time=$(date +%s)
-    rhdh_url="$(rhdh_public_url "$ns")" || {
+    rhdh_url="$(openshift_route_url redhat-developer-hub "$ns")" || {
         echo "Error: Could not resolve RHDH route in namespace '$ns'."
         return 1
     }
@@ -444,7 +278,7 @@ run_post_setup_workflow_smoke() {
         curl -sf --max-time 5 "http://localhost:8080/q/health/ready" >/dev/null
 
     local orchestrator_url orch_health
-    orchestrator_url="$(rhdh_public_url "$ns")" || {
+    orchestrator_url="$(openshift_route_url redhat-developer-hub "$ns")" || {
         echo "Error: Could not resolve RHDH route for post-setup smoke."
         exit 1
     }
@@ -469,10 +303,6 @@ if [[ -n "$prepare_internal_osl_release" ]]; then
     log "Loaded OSL_LOGIC_CSV=${OSL_LOGIC_CSV}"
     log "Loaded OSL_CATALOG_SOURCE=${OSL_CATALOG_SOURCE}"
     phase_checkpoint "internal-mirror-prep-complete"
-elif [[ -f "${SCRIPT_DIR}/.env.osl" ]]; then
-    # shellcheck disable=SC1091
-    source "${SCRIPT_DIR}/.env.osl"
-    log "Loaded existing .env.osl (OSL_LOGIC_CSV=${OSL_LOGIC_CSV:-unset} OSL_CATALOG_SOURCE=${OSL_CATALOG_SOURCE:-unset})"
 fi
 
 # ── Pre-deploy: export secrets for envsubst in helm/deploy.sh ───────────────
@@ -488,7 +318,7 @@ fi
 
 log "Preparing Keycloak before shared orchestrator install..."
 prepare_keycloak
-sync_keycloak_runtime_env
+export_keycloak_runtime_env "$KEYCLOAK_NAMESPACE"
 
 run_shared_orchestrator_install
 assert_pre_release_install_state
@@ -504,7 +334,7 @@ SKIP_ORCHESTRATOR_INFRA_INSTALL=1 \
 ./deploy.sh helm "$version" --namespace "$namespace" --with-orchestrator
 phase_checkpoint "rhdh-deployed"
 
-RHDH_BASE_URL="$(rhdh_public_url "$namespace")" || {
+RHDH_BASE_URL="$(openshift_route_url redhat-developer-hub "$namespace")" || {
     echo "Error: Could not resolve RHDH route after deploy."
     exit 1
 }

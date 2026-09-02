@@ -440,8 +440,18 @@ rhdh-test-instance/
 │       ├── config-keycloak-plugin.sh       # Keycloak deploy, realm/client/user setup
 │       └── config-lighthouse-plugin.sh     # Lighthouse deploy and URL injection
 ├── utils/
-│   ├── keycloak/                           # Shared Keycloak deploy used by setup-orchestrator
-│   └── orchestrator/                       # Data Index rewrite proxy and existing-RHDH checks
+│   ├── shell/
+│   │   ├── common.sh                       # log, die, require_cmd
+│   │   ├── openshift.sh                    # oc login, namespace validation, route helpers
+│   │   └── workspace.sh                    # resolve_workspace_dir
+│   ├── keycloak/
+│   │   ├── lib.sh                          # Shared Keycloak REST + runtime env helpers
+│   │   ├── keycloak-deploy.sh
+│   │   └── update-rhdh-client-redirects.sh
+│   └── orchestrator/
+│       ├── assert-osl-operators.sh         # OSL operator subscription/CSV asserts
+│       ├── probe-dataindex-rewrite.sh      # Data Index GraphQL probe via osl-di-rewrite
+│       └── deploy-smoke-workflows.sh
 ├── cleanup.sh                              # Orchestrator/OSL teardown (operators optional)
 ├── deploy.sh                               # Main deploy entry point
 ├── prepare-osl-internal.sh                 # Mirror pre-release OSL into the internal registry
