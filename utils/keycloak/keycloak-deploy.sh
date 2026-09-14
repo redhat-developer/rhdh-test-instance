@@ -46,48 +46,29 @@ KEYCLOAK_PROTOCOL="$(keycloak_console_protocol)"
 
 # Create OpenShift Route
 echo "Creating OpenShift Route (protocol: $KEYCLOAK_PROTOCOL)..."
+route_tls=""
 if [ "$KEYCLOAK_PROTOCOL" = "https" ]; then
-cat <<EOF | oc apply -f -
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: $KEYCLOAK_RELEASE_NAME
-  namespace: $NAMESPACE
-  labels:
-    app.kubernetes.io/name: keycloak
-    app.kubernetes.io/instance: $KEYCLOAK_RELEASE_NAME
-spec:
-  to:
-    kind: Service
-    name: $KEYCLOAK_RELEASE_NAME
-    weight: 100
-  port:
-    targetPort: http
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
-  wildcardPolicy: None
-EOF
-else
-cat <<EOF | oc apply -f -
-apiVersion: route.openshift.io/v1
-kind: Route
-metadata:
-  name: $KEYCLOAK_RELEASE_NAME
-  namespace: $NAMESPACE
-  labels:
-    app.kubernetes.io/name: keycloak
-    app.kubernetes.io/instance: $KEYCLOAK_RELEASE_NAME
-spec:
-  to:
-    kind: Service
-    name: $KEYCLOAK_RELEASE_NAME
-    weight: 100
-  port:
-    targetPort: http
-  wildcardPolicy: None
-EOF
+  route_tls=$'  tls:\n    termination: edge\n    insecureEdgeTerminationPolicy: Redirect'
 fi
+cat <<EOF | oc apply -f -
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: $KEYCLOAK_RELEASE_NAME
+  namespace: $NAMESPACE
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/instance: $KEYCLOAK_RELEASE_NAME
+spec:
+  to:
+    kind: Service
+    name: $KEYCLOAK_RELEASE_NAME
+    weight: 100
+  port:
+    targetPort: http
+$route_tls
+  wildcardPolicy: None
+EOF
 
 KEYCLOAK_URL="$(keycloak_route_url "$NAMESPACE" "$KEYCLOAK_RELEASE_NAME")" || {
   echo "Error: Failed to get Keycloak route" && exit 1
@@ -199,4 +180,3 @@ export KEYCLOAK_REALM="rhdh"
 export KEYCLOAK_LOGIN_REALM="rhdh"
 export KEYCLOAK_METADATA_URL="$KEYCLOAK_URL/realms/rhdh"
 export KEYCLOAK_BASE_URL="$KEYCLOAK_URL"
-export KEYCLOAK_PROTOCOL

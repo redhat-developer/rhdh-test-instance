@@ -47,16 +47,11 @@ keycloak_api_call() {
     local description=$4
     local response http_code body
 
-    if [[ -n "$data" ]]; then
-        response=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "$data")
-    else
-        response=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H "Content-Type: application/json")
-    fi
+    local curl_args=(-sk -w "\n%{http_code}" -X "$method" "$url"
+        -H "Authorization: Bearer $ADMIN_TOKEN"
+        -H "Content-Type: application/json")
+    [[ -n "$data" ]] && curl_args+=(-d "$data")
+    response=$(curl "${curl_args[@]}")
 
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | sed '$d')

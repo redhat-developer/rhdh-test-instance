@@ -26,16 +26,6 @@ validate_k8s_namespace() {
     fi
 }
 
-openshift_route_scheme() {
-    local name="$1"
-    local ns="$2"
-    if oc get route "$name" -n "$ns" -o jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
-        echo https
-    else
-        echo http
-    fi
-}
-
 openshift_route_url() {
     local name="$1"
     local ns="$2"

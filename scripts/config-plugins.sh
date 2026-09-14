@@ -32,33 +32,11 @@ _append_plugin_dynamic_config() {
 
 declare -A CATEGORY_SETUP_FUNCTIONS=(
   [KEYCLOAK]="deploy_keycloak config_secrets_for_keycloak_plugins create_users_and_groups_keycloak apply_keycloak_labels"
-  # [TEKTON]="deploy_tekon deploy_pipelines apply_tekton_labels"
-  # [OCM]="deploy_acm config_secrets_for_ocm_plugins deploy_multicluster_hub apply_ocm_labels"
-  # [3SCALE]="copy_3scale_files deploy_3scale deploy_minio deploy_3scale_resources"
-  # [NEXUS]="deploy_nexus wait_for_nexus_operator_and_deploy_instance wait_for_nexus_instance config_secrets_for_nexus_plugins apply_nexus_labels populate_nexus_demo_data register_nexus_demo_catalog_entities"
-  # [ARGOCD]="deploy_argocd wait_for_argocd_operator_and_deploy_instance wait_for_argocd_instance_and_deploy_demo_applications config_secrets_for_argocd_plugins apply_argocd_labels register_argocd_demo_catalog_entities"
-  # [KUBERNETES]="config_secrets_for_kubernetes_plugins"
-  # [SONARQUBE]="deploy_sonarqube wait_for_sonarqube_and_populate_demo_data config_secrets_for_sonarqube_plugins apply_sonarqube_labels register_sonarqube_demo_catalog_entities"
-  # [TECHDOCS]="copy_techdocs_files deploy_techdocs_minio wait_for_minio_and_create_techdocs_bucket config_secrets_for_techdocs_plugins publish_techdocs_demo_docs register_techdocs_demo_catalog_entities"
-  # [NOTIFICATIONS]="config_secrets_for_notifications_plugins populate_notifications_demo_data register_notifications_demo_catalog_entities"
-  # [JENKINS]="deploy_jenkins wait_for_jenkins_and_populate_demo_data config_secrets_for_jenkins_plugins apply_jenkins_labels register_jenkins_demo_catalog_entities"
-  # [JFROG_ARTIFACTORY]="deploy_jfrog_artifactory wait_for_jfrog_and_populate_demo_data config_secrets_for_jfrog_artifactory_plugins apply_jfrog_artifactory_labels register_jfrog_artifactory_demo_catalog_entities"
   [LIGHTHOUSE]="deploy_lighthouse config_secrets_for_lighthouse_plugins apply_lighthouse_labels run_lighthouse_initial_scan"
 )
 
 declare -A CATEGORY_TEARDOWN_FUNCTIONS=(
   [KEYCLOAK]="uninstall_keycloak"
-  # [TEKTON]="uninstall_tekton"
-  # [OCM]="uninstall_acm"
-  # [3SCALE]="uninstall_3scale"
-  # [NEXUS]="uninstall_nexus"
-  # [ARGOCD]="uninstall_argocd"
-  # [KUBERNETES]=":"
-  # [SONARQUBE]="uninstall_sonarqube"
-  # [TECHDOCS]="uninstall_techdocs"
-  # [NOTIFICATIONS]="uninstall_notifications"
-  # [JENKINS]="uninstall_jenkins"
-  # [JFROG_ARTIFACTORY]="uninstall_jfrog_artifactory"
   [LIGHTHOUSE]="uninstall_lighthouse"
 )
 

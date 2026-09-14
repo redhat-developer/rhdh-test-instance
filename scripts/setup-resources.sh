@@ -134,20 +134,13 @@ apply_rhdh_configmaps() {
   echo ""
   echo "Applying RHDH ConfigMaps..."
 
-  oc create configmap app-config-rhdh \
-    --from-file="${ROOT_DIR}/config/app-config-rhdh.yaml" \
-    --namespace="${NAMESPACE}" \
-    --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
-
-  oc create configmap app-config-guest-auth \
-    --from-file="${ROOT_DIR}/config/app-config-guest-auth.yaml" \
-    --namespace="${NAMESPACE}" \
-    --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
-
-  oc create configmap dynamic-plugins \
-    --from-file="${ROOT_DIR}/config/dynamic-plugins.yaml" \
-    --namespace="${NAMESPACE}" \
-    --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
+  local configmap
+  for configmap in app-config-rhdh app-config-guest-auth dynamic-plugins; do
+    oc create configmap "$configmap" \
+      --from-file="${ROOT_DIR}/config/${configmap}.yaml" \
+      --namespace="${NAMESPACE}" \
+      --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
+  done
 
   echo "RHDH ConfigMaps applied!"
 }
@@ -170,24 +163,20 @@ apply_rbac_policies() {
 }
 
 # =============================================================================
-# Image Stream Imports
-#
-# Pre-import container images from external registries to avoid rate-limit
-# failures during plugin deployment. Applied before plugin scripts run so the
-# images are cached in the cluster registry by the time they are needed.
+# Optional YAML directories
 # =============================================================================
-apply_image_stream_imports() {
+apply_yaml_directory() {
+  local directory="$1"
+  local label="$2"
+
   echo ""
-  echo "Applying image stream imports..."
-
-  local image_stream_dir="${ROOT_DIR}/resources/image-stream-imports"
-
-  if [[ ! -d "$image_stream_dir" ]] || [[ -z "$(ls -A "$image_stream_dir" 2>/dev/null)" ]]; then
-    echo "  No image stream imports found — skipping."
+  echo "Applying ${label}..."
+  if [[ ! -d "$directory" ]] || [[ -z "$(ls -A "$directory" 2>/dev/null)" ]]; then
+    echo "  No ${label} found — skipping."
     return 0
   fi
 
-  for yaml_file in "${image_stream_dir}"/*.yaml; do
+  for yaml_file in "${directory}"/*.yaml; do
     local name
     name=$(basename "$yaml_file")
     echo "  Applying: ${name}"
@@ -195,7 +184,13 @@ apply_image_stream_imports() {
       echo "  Warning: Failed to apply ${name} — continuing."
   done
 
-  echo "Image stream imports applied!"
+  echo "${label^} applied!"
+}
+
+# Pre-import container images from external registries to avoid rate-limit
+# failures during plugin deployment.
+apply_image_stream_imports() {
+  apply_yaml_directory "${ROOT_DIR}/resources/image-stream-imports" "image stream imports"
 }
 
 # =============================================================================
@@ -207,25 +202,7 @@ apply_image_stream_imports() {
 # being imported (e.g. internal-alpine).
 # =============================================================================
 apply_demo_resources() {
-  echo ""
-  echo "Applying demo resources..."
-
-  local examples_dir="${ROOT_DIR}/resources/rhdh-script-examples"
-
-  if [[ ! -d "$examples_dir" ]] || [[ -z "$(ls -A "$examples_dir" 2>/dev/null)" ]]; then
-    echo "  No demo resources found — skipping."
-    return 0
-  fi
-
-  for yaml_file in "${examples_dir}"/*.yaml; do
-    local name
-    name=$(basename "$yaml_file")
-    echo "  Applying: ${name}"
-    oc apply -f "${yaml_file}" --namespace="${NAMESPACE}" || \
-      echo "  Warning: Failed to apply ${name} — continuing."
-  done
-
-  echo "Demo resources applied!"
+  apply_yaml_directory "${ROOT_DIR}/resources/rhdh-script-examples" "demo resources"
 }
 
 # =============================================================================

@@ -28,53 +28,14 @@ _KEYCLOAK_USERS_FILE="${PWD}/resources/keycloak/users.json"
 _KEYCLOAK_GROUPS_FILE="${PWD}/resources/keycloak/groups.json"
 _KEYCLOAK_VALUES_FILE="${PWD}/resources/keycloak/keycloak-values.yaml"
 
+# shellcheck disable=SC1091
+source "${PWD}/utils/keycloak/lib.sh"
+
 # Shared state set by config_secrets_for_keycloak_plugins and consumed by
 # create_users_and_groups_keycloak. Declared here so they are always in scope
 # when the file is sourced by config-plugins.sh.
 KEYCLOAK_URL=""
 ADMIN_TOKEN=""
-
-# =============================================================================
-# Helper: Keycloak REST API wrapper
-# Prefixed to avoid collisions when sourced alongside other plugin scripts.
-# =============================================================================
-_keycloak_api_call() {
-  local method=$1
-  local url=$2
-  local data=$3
-  local description=$4
-  local response http_code body
-
-  if [[ -n "$data" ]]; then
-    response=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-      -H "Content-Type: application/json" \
-      -d "$data")
-  else
-    response=$(curl -sk -w "\n%{http_code}" -X "$method" "$url" \
-      -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-      -H "Content-Type: application/json")
-  fi
-
-  http_code=$(echo "$response" | tail -1)
-  body=$(echo "$response" | sed '$d')
-
-  if [[ "$method" == "GET" ]] || [[ "$http_code" -lt 400 ]]; then
-    echo "$body"
-    return 0
-  fi
-
-  # 409 Conflict is acceptable for idempotent create operations.
-  if [[ "$http_code" == "409" ]]; then
-    echo "Warning: ${description} — already exists (continuing)" >&2
-    echo "$body"
-    return 0
-  fi
-
-  echo "Error: ${description} failed (HTTP ${http_code}): ${body}" >&2
-  return 1
-}
-
 
 # =============================================================================
 # Step 1: Deploy Keycloak (quick action — no waiting)
@@ -207,26 +168,13 @@ config_secrets_for_keycloak_plugins() {
     --namespace="${NAMESPACE}" \
     -o jsonpath='{.data.admin-password}' | base64 -d)
 
-  local token_response token_http_code token_body
-  token_response=$(curl -sk -w "\n%{http_code}" -X POST \
-    "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
-    -d "username=admin&password=${kc_admin_password}&grant_type=password&client_id=admin-cli")
-  token_http_code=$(echo "$token_response" | tail -1)
-  token_body=$(echo "$token_response" | sed '$d')
-
-  if [[ "$token_http_code" -ge 400 ]]; then
-    echo "Error: Failed to get admin token (HTTP ${token_http_code}): ${token_body}"
+  ADMIN_TOKEN="$(keycloak_admin_token "$KEYCLOAK_URL" "$kc_admin_password")" || {
+    echo "Error: Failed to get admin token."
     return 1
-  fi
-
-  ADMIN_TOKEN=$(echo "$token_body" | jq -r '.access_token // empty')
-  if [[ -z "${ADMIN_TOKEN}" ]]; then
-    echo "Error: Failed to parse admin token."
-    return 1
-  fi
+  }
 
   echo "Creating realm 'rhdh'..."
-  _keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms" \
+  keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms" \
     '{"realm":"rhdh","enabled":true,"displayName":"RHDH Realm"}' \
     "Create realm" >/dev/null
 
@@ -238,7 +186,7 @@ config_secrets_for_keycloak_plugins() {
     --namespace="${NAMESPACE}" \
     -o jsonpath='{.data.client-secret}' | base64 -d)
 
-  _keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms/rhdh/clients" \
+  keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms/rhdh/clients" \
     "$(jq -c \
         --arg secret "${kc_client_secret}" \
         --arg redirect_uri "${rhdh_redirect_uri}" \
@@ -248,7 +196,7 @@ config_secrets_for_keycloak_plugins() {
 
   local service_account_id realm_mgmt_id roles
 
-  service_account_id=$(_keycloak_api_call GET \
+  service_account_id=$(keycloak_api_call GET \
     "${KEYCLOAK_URL}/admin/realms/rhdh/users?username=service-account-rhdh-client" \
     "" "Get service account" | jq -r '.[0].id // empty')
 
@@ -257,7 +205,7 @@ config_secrets_for_keycloak_plugins() {
     return 1
   fi
 
-  realm_mgmt_id=$(_keycloak_api_call GET \
+  realm_mgmt_id=$(keycloak_api_call GET \
     "${KEYCLOAK_URL}/admin/realms/rhdh/clients?clientId=realm-management" \
     "" "Get realm-management client" | jq -r '.[0].id // empty')
 
@@ -266,7 +214,7 @@ config_secrets_for_keycloak_plugins() {
     return 1
   fi
 
-  roles=$(_keycloak_api_call GET \
+  roles=$(keycloak_api_call GET \
     "${KEYCLOAK_URL}/admin/realms/rhdh/clients/${realm_mgmt_id}/roles" \
     "" "Get roles" | \
     jq -c '[.[] | select(.name == "view-authorization" or .name == "manage-authorization" or .name == "view-users")]')
@@ -277,7 +225,7 @@ config_secrets_for_keycloak_plugins() {
   fi
 
   echo "Assigning service account roles..."
-  _keycloak_api_call POST \
+  keycloak_api_call POST \
     "${KEYCLOAK_URL}/admin/realms/rhdh/users/${service_account_id}/role-mappings/clients/${realm_mgmt_id}" \
     "$roles" "Assign service account roles" >/dev/null
 
@@ -325,25 +273,10 @@ create_users_and_groups_keycloak() {
     --namespace="${NAMESPACE}" \
     -o jsonpath='{.data.admin-password}' | base64 -d)
 
-  local token_response
-  token_response=$(curl -sk -w "\n%{http_code}" -X POST \
-    "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
-    -d "username=admin&password=${kc_admin_password}&grant_type=password&client_id=admin-cli")
-
-  local token_http_code token_body
-  token_http_code=$(echo "$token_response" | tail -1)
-  token_body=$(echo "$token_response" | sed '$d')
-
-  if [[ "$token_http_code" -ge 400 ]]; then
-    echo "Error: Failed to refresh admin token (HTTP ${token_http_code}): ${token_body}"
+  ADMIN_TOKEN="$(keycloak_admin_token "$KEYCLOAK_URL" "$kc_admin_password")" || {
+    echo "Error: Failed to refresh admin token."
     return 1
-  fi
-
-  ADMIN_TOKEN=$(echo "$token_body" | jq -r '.access_token // empty')
-  if [[ -z "${ADMIN_TOKEN}" ]]; then
-    echo "Error: Failed to parse refreshed admin token."
-    return 1
-  fi
+  }
   echo "Admin token refreshed."
 
   if [[ -f "${_KEYCLOAK_GROUPS_FILE}" ]]; then
@@ -352,7 +285,7 @@ create_users_and_groups_keycloak() {
     }
     echo "Creating groups..."
     jq -r '.[].name' "${_KEYCLOAK_GROUPS_FILE}" | while read -r group; do
-      _keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms/rhdh/groups" \
+      keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms/rhdh/groups" \
         "{\"name\":\"${group}\"}" \
         "Create group '${group}'" >/dev/null \
         && echo "  Created group: ${group}" \
@@ -374,7 +307,7 @@ create_users_and_groups_keycloak() {
       user_payload=$(echo "$user_json" | jq -c --arg pw "${USER_PASSWORD}" \
         'del(.groups) | .credentials = [{"type":"password","value":$pw,"temporary":false}]')
 
-      if ! _keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms/rhdh/users" \
+      if ! keycloak_api_call POST "${KEYCLOAK_URL}/admin/realms/rhdh/users" \
           "$user_payload" "Create user '${username}'" >/dev/null; then
         echo "  Warning: Failed to create user: ${username}"
         continue
@@ -382,7 +315,7 @@ create_users_and_groups_keycloak() {
       echo "  Created user: ${username}"
 
       if [[ -n "$groups" ]]; then
-        user_id=$(_keycloak_api_call GET \
+        user_id=$(keycloak_api_call GET \
           "${KEYCLOAK_URL}/admin/realms/rhdh/users?username=${username}" \
           "" "Get user ID" | jq -r '.[0].id // empty')
 
@@ -390,13 +323,13 @@ create_users_and_groups_keycloak() {
 
         for group in $(echo "$groups" | tr ',' ' '); do
           local group_id
-          group_id=$(_keycloak_api_call GET \
+          group_id=$(keycloak_api_call GET \
             "${KEYCLOAK_URL}/admin/realms/rhdh/groups?search=${group}" \
             "" "Get group ID" | jq -r '.[0].id // empty')
 
           [[ -z "$group_id" ]] && echo "    Warning: Group '${group}' not found" && continue
 
-          _keycloak_api_call PUT \
+          keycloak_api_call PUT \
             "${KEYCLOAK_URL}/admin/realms/rhdh/users/${user_id}/groups/${group_id}" \
             "" "Add ${username} to group ${group}" >/dev/null \
             && echo "    Added to group: ${group}" \
@@ -435,21 +368,15 @@ create_users_and_groups_keycloak() {
 apply_keycloak_labels() {
   echo "Applying Kubernetes labels for Keycloak resources..."
 
-  declare -A patterns=(
-    ["keycloak"]="backstage.io/kubernetes-id=keycloak"
-  )
-
+  local label="backstage.io/kubernetes-id=keycloak"
   local resource_types=("pods" "deployments" "replicasets" "services" "routes" "statefulsets")
 
   for resource in "${resource_types[@]}"; do
-    for pattern in "${!patterns[@]}"; do
-      local label="${patterns[$pattern]}"
-      oc get "$resource" -n "${NAMESPACE}" --no-headers \
-        -o custom-columns=":metadata.name" 2>/dev/null \
-        | grep "$pattern" \
-        | xargs -I {} oc label "$resource" {} "$label" --overwrite \
-            -n "${NAMESPACE}" 2>/dev/null || true
-    done
+    oc get "$resource" -n "${NAMESPACE}" --no-headers \
+      -o custom-columns=":metadata.name" 2>/dev/null \
+      | grep keycloak \
+      | xargs -I {} oc label "$resource" {} "$label" --overwrite \
+          -n "${NAMESPACE}" 2>/dev/null || true
   done
 
   echo "Keycloak labels applied!"

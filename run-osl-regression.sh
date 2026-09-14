@@ -170,8 +170,6 @@ ensure_e2e_deps() {
     log "yarn install in ${e2e}"
     if command -v corepack >/dev/null 2>&1; then
         (cd "$e2e" && corepack yarn install)
-    elif command -v npx >/dev/null 2>&1; then
-        (cd "$e2e" && npx --yes corepack yarn install)
     else
         (cd "$e2e" && yarn install)
     fi

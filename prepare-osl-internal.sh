@@ -254,19 +254,8 @@ mirror_image() {
         skopeo_args+=(--override-arch amd64 --override-os linux)
     fi
 
-    local attempt=0 max_attempts=3 wait_secs=10
-    while (( attempt < max_attempts )); do
-        attempt=$((attempt + 1))
-        if skopeo "${skopeo_args[@]}" "docker://${source_ref}" "docker://${push_ref}"; then
-            return 0
-        fi
-        if (( attempt < max_attempts )); then
-            log "  Retry ${attempt}/${max_attempts} in ${wait_secs}s..."
-            sleep "$wait_secs"
-            wait_secs=$((wait_secs * 2))
-        fi
-    done
-    die "Failed to mirror ${source_ref} after ${max_attempts} attempts"
+    skopeo "${skopeo_args[@]}" "docker://${source_ref}" "docker://${push_ref}" \
+        || die "Failed to mirror ${source_ref}"
 }
 
 rewrite_operator_bundle_csv() {
