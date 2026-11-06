@@ -1,18 +1,26 @@
 NAMESPACE ?= rhdh
-VERSION ?= 1.9
-ORCH ?= false
+VERSION ?= 2.2
 PLUGINS ?=
 USE_CONTAINER ?= false
 CATALOG_INDEX_TAG ?=
+CATALOG_INDEX_IMAGE ?=
+RHDH_IMAGE ?=
 RUNNER_IMAGE ?= quay.io/rhdh-community/rhdh-e2e-runner:main
+KEYCLOAK_NS ?= rhdh-keycloak
+OPERATOR_NAMESPACE ?= rhdh-operator-system
 
 export CATALOG_INDEX_TAG
+export CATALOG_INDEX_IMAGE
+export RHDH_IMAGE
+export KEYCLOAK_NS
+export OPERATOR_NAMESPACE
 
-# Build deploy flags
+# ── Deploy flags ──────────────────────────────────────────────────────────────
+# PLUGINS=<list>   Comma-separated optional plugins, "all", or "all,-name".
+#                  Available: kubernetes, bulk-import, intelligent-assistant,
+#                  orchestrator, scorecard, rbac, lighthouse (Keycloak is always on).
+
 DEPLOY_FLAGS = --namespace $(NAMESPACE)
-ifeq ($(ORCH),true)
-DEPLOY_FLAGS += --with-orchestrator
-endif
 ifneq ($(PLUGINS),)
 DEPLOY_FLAGS += --plugins $(PLUGINS)
 endif
@@ -21,17 +29,17 @@ endif
 
 .PHONY: deploy-helm install-operator deploy-operator
 
-deploy-helm: ## Deploy RHDH via Helm (ORCH=1 for orchestrator, USE_CONTAINER=1 to run in container)
+deploy-helm: ## Deploy RHDH via Helm (PLUGINS=all,-orchestrator, USE_CONTAINER=true to run in container)
 ifeq ($(USE_CONTAINER),true)
 	$(MAKE) run-in-runner CMD="./deploy.sh helm $(VERSION) $(DEPLOY_FLAGS)"
 else
 	./deploy.sh helm $(VERSION) $(DEPLOY_FLAGS)
 endif
 
-install-operator: ## Install RHDH operator on cluster (one-time, runs in container)
-	$(MAKE) run-in-runner CMD="source operator/install-operator.sh $(VERSION)"
+install-operator: ## Install the RHDH operator via OLM (runs in the e2e-runner container)
+	$(MAKE) run-in-runner CMD="bash operator/install-operator.sh $(VERSION)"
 
-deploy-operator: ## Deploy RHDH instance via Operator (ORCH=1 for orchestrator, USE_CONTAINER=1 to run in container)
+deploy-operator: ## Deploy RHDH via Operator (PLUGINS=..., USE_CONTAINER=true to run in container)
 ifeq ($(USE_CONTAINER),true)
 	$(MAKE) run-in-runner CMD="./deploy.sh operator $(VERSION) $(DEPLOY_FLAGS)"
 else
@@ -40,33 +48,47 @@ endif
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
-.PHONY: undeploy-helm undeploy-operator undeploy-infra undeploy-plugins clean
+.PHONY: undeploy-helm undeploy-operator undeploy-plugins undeploy-keycloak undeploy-infra uninstall-operator clean
 
-undeploy-helm: ## Uninstall Helm RHDH release and all cluster resources (PLUGINS=keycloak,lighthouse to also teardown plugin infra)
+undeploy-helm: ## Uninstall Helm RHDH release and all cluster resources (PLUGINS=lighthouse to also teardown plugin infra)
 ifdef PLUGINS
 	./teardown.sh helm --namespace $(NAMESPACE) --plugins $(PLUGINS)
 else
 	./teardown.sh helm --namespace $(NAMESPACE)
 endif
 
-undeploy-operator: ## Remove Operator RHDH deployment and all cluster resources (PLUGINS=keycloak,lighthouse to also teardown plugin infra)
+undeploy-operator: ## Remove Operator RHDH deployment and all cluster resources
 ifdef PLUGINS
 	./teardown.sh operator --namespace $(NAMESPACE) --plugins $(PLUGINS)
 else
 	./teardown.sh operator --namespace $(NAMESPACE)
 endif
 
-undeploy-plugins: ## Teardown plugin infrastructure only, leave RHDH running (PLUGINS=keycloak,lighthouse)
+undeploy-plugins: ## Teardown plugin infrastructure only, leave RHDH running (PLUGINS=lighthouse,keycloak)
 ifndef PLUGINS
-	$(error PLUGINS is required, e.g. make undeploy-plugins PLUGINS=keycloak,lighthouse)
+	$(error PLUGINS is required, e.g. make undeploy-plugins PLUGINS=lighthouse)
 endif
-	TEARDOWN=true NAMESPACE=$(NAMESPACE) bash scripts/config-plugins.sh $(PLUGINS)
+	TEARDOWN=true NAMESPACE=$(NAMESPACE) KEYCLOAK_NS=$(KEYCLOAK_NS) bash scripts/config-plugins.sh $(PLUGINS)
+
+undeploy-keycloak: ## Remove the shared Keycloak (only after all instances are gone)
+	TEARDOWN=true NAMESPACE=$(NAMESPACE) KEYCLOAK_NS=$(KEYCLOAK_NS) bash scripts/config-plugins.sh keycloak
 
 undeploy-infra: ## Uninstall orchestrator infra chart
 	helm uninstall orchestrator-infra -n $(NAMESPACE) || true
 
-clean: ## Delete the entire namespace (removes everything)
+uninstall-operator: ## Uninstall the RHDH operator (deletes the operator namespace)
+	oc delete project $(OPERATOR_NAMESPACE) --ignore-not-found
+	@echo "Operator uninstalled. RHDH CRDs may linger until all Backstage CRs are removed."
+
+clean: ## Delete the entire deployment namespace (does NOT uninstall the operator or Keycloak)
 	oc delete project $(NAMESPACE) --ignore-not-found
+
+# ── Verification ──────────────────────────────────────────────────────────────
+
+.PHONY: verify-plugins
+
+verify-plugins: ## Render the deployment and run the real plugin installer locally (requires podman)
+	bash scripts/verify-plugins.sh --version $(VERSION) --plugins "$(PLUGINS)"
 
 # ── Status ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +109,7 @@ logs: ## Tail RHDH pod logs
 
 url: ## Print the RHDH URL
 	@CLUSTER_ROUTER_BASE=$$(oc get route console -n openshift-console -o=jsonpath='{.spec.host}' | sed 's/^[^.]*\.//'); \
-	echo "http://redhat-developer-hub-$(NAMESPACE).$${CLUSTER_ROUTER_BASE}"
+	echo "https://redhat-developer-hub-$(NAMESPACE).$${CLUSTER_ROUTER_BASE}"
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
@@ -97,14 +119,22 @@ run-in-runner: ## Run a command inside the e2e-runner container (requires oc log
 ifndef CMD
 	$(error CMD is required)
 endif
-	$(eval K8S_CLUSTER_URL := $(shell oc whoami --show-server))
-	$(eval K8S_CLUSTER_TOKEN := $(shell oc whoami --show-token))
+	K8S_CLUSTER_URL="$$(oc whoami --show-server)" K8S_CLUSTER_TOKEN="$$(oc whoami --show-token)" \
 	podman run --rm \
 		-v $(CURDIR):/workspace:z \
 		-w /workspace \
-		-e KUBECONFIG=/tmp/.kube/config \
+		--tmpfs /run/rhdh:rw,mode=0700 \
+		-e KUBECONFIG=/run/rhdh/kubeconfig -e TMPDIR=/run/rhdh \
+		-e K8S_CLUSTER_URL -e K8S_CLUSTER_TOKEN \
+		-e CATALOG_INDEX_IMAGE -e CATALOG_INDEX_TAG -e RHDH_IMAGE \
+		-e KEYCLOAK_NS -e OPERATOR_NAMESPACE \
+		-e GITHUB_TOKEN -e SONARQUBE_API_KEY \
+		-e ENABLE_OPENAI -e OPENAI_API_KEY \
+		-e ENABLE_VLLM -e VLLM_URL -e VLLM_API_KEY \
+		-e ENABLE_OLLAMA -e OLLAMA_URL \
+		-e ENABLE_VERTEX_AI -e VERTEX_AI_PROJECT -e VERTEX_AI_LOCATION \
 		$(RUNNER_IMAGE) \
-		bash -c 'mkdir -p /tmp/.kube && oc login --token=$(K8S_CLUSTER_TOKEN) --server=$(K8S_CLUSTER_URL) --insecure-skip-tls-verify=true && source .env && $(CMD)'
+		bash -c 'oc login --token="$$K8S_CLUSTER_TOKEN" --server="$$K8S_CLUSTER_URL" --insecure-skip-tls-verify=true >/dev/null && source .env && $(CMD)'
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 

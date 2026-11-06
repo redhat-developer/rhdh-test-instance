@@ -1,0 +1,28 @@
+# Provider enablement is selected from the ENABLE_* settings in .env.
+- type: sentence_transformers
+- type: openai
+  id: openai
+  api_key_env: OPENAI_API_KEY
+  allowed_models:
+    - gpt-4o-mini
+    - gpt-4.1-mini
+    - gpt-4.1-nano
+    - gpt-4o
+- type: vllm
+  id: vllm
+  api_key_env: VLLM_API_KEY
+  extra:
+    base_url: ${env.VLLM_URL}
+    max_tokens: ${env.VLLM_MAX_TOKENS:=4096}
+    network:
+      tls:
+        verify: ${env.VLLM_TLS_VERIFY:=true}
+- type: ollama
+  id: ollama
+  extra:
+    url: ${env.OLLAMA_URL}
+- type: vertexai
+  id: vertexai
+  extra:
+    project: ${env.VERTEX_AI_PROJECT}
+    location: ${env.VERTEX_AI_LOCATION:=global}

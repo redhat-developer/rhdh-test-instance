@@ -1,9 +1,5 @@
 [
-  {"name": "avengers"},
-  {"name": "defenders"},
-  {"name": "fantastic-four"},
-  {"name": "guardians-of-the-galaxy"},
-  {"name": "x-force"},
-  {"name": "x-men"},
-  {"name": "cluster-admins"}
+  {"name": "developers"},
+  {"name": "admins"},
+  {"name": "viewers"}
 ]

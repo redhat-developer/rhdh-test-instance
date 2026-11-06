@@ -1,5 +1,5 @@
+# The bundled catalog defaults are the base configuration. Plugin overrides for
+# the selected --plugins are appended at deploy time.
 includes:
   - dynamic-plugins.default.yaml
-plugins:
-  - package: ./dynamic-plugins/dist/backstage-community-plugin-analytics-provider-segment
-    disabled: true
+plugins: []

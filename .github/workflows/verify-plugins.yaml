@@ -1,0 +1,48 @@
+name: Verify plugin configuration
+
+on:
+  pull_request:
+    paths:
+      - 'config/**'
+      - 'resources/**'
+      - 'helm/**'
+      - 'operator/**'
+      - 'scripts/**'
+      - 'Makefile'
+      - '.github/workflows/verify-plugins.yaml'
+  schedule:
+    # Weekly run so plugin catalog or "next" drift is caught even without PRs.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['2.2', 'next']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Install yq and skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends skopeo
+          sudo curl -fsSL \
+            https://github.com/mikefarah/yq/releases/download/v4.47.2/yq_linux_amd64 \
+            -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Verify plugins (${{ matrix.version }})
+        run: make verify-plugins VERSION=${{ matrix.version }} PLUGINS=all

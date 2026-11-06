@@ -1,8 +1,0 @@
-auth:
-  environment: development
-  providers:
-    guest:
-      development:
-        userEntityRef: user:default/guest
-        dangerouslyAllowOutsideDevelopment: true
-signInPage: guest

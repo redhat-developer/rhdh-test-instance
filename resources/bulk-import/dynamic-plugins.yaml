@@ -1,0 +1,7 @@
+# Bulk import of existing repositories. Requires GITHUB_TOKEN to list
+# repositories and open pull requests; without it the UI loads but import
+# requests fail.
+- package: ref://red-hat-developer-hub-backstage-plugin-bulk-import
+  enabled: true
+- package: ref://red-hat-developer-hub-backstage-plugin-bulk-import-backend
+  enabled: true

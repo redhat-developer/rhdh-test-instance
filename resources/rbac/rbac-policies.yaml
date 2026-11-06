@@ -8,15 +8,16 @@ data:
   rbac-policy.csv: |
     p, role:default/admin, catalog-entity, read, allow
     p, role:default/admin, catalog.entity.create, create, allow
+    p, role:default/admin, scorecard.metric.read, read, allow
 
-    g, user:default/guest, role:default/admin
+    g, user:default/test1, role:default/admin
 
-    p, role:default/admin, catalog-entity, read, allow
-    p, role:default/admin, catalog.entity.create, create, allow
+    p, role:default/developer, catalog-entity, read, allow
+    p, role:default/developer, scorecard.metric.read, read, allow
 
-    g, user:default/someuser, role:default/developer
+    g, user:default/test2, role:default/developer
 
-    g, user:default/ant-man, role:default/conditional-role
+    g, user:default/test2, role:default/conditional-role
   conditional-policy.yaml: |
     result: CONDITIONAL
     roleEntityRef: 'role:default/conditional-role'

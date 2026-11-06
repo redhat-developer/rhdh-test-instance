@@ -1,5 +1,12 @@
 app:
   baseUrl: '${RHDH_BASE_URL}'
+  extensions:
+    # Translation testing for Test Day.
+    - api:app/app-language:
+        config:
+          availableLanguages: [en, de, es, fr, it, ja]
+          defaultLanguage: en
+
 backend:
   baseUrl: '${RHDH_BASE_URL}'
   cors:
@@ -14,13 +21,17 @@ backend:
       - 'data:'
 
 auth:
-  # see https://backstage.io/docs/auth/ to learn about auth providers
   session:
     secret: '${SESSION_SECRET}'
+
+# Public access only. A GITHUB_TOKEN, when supplied, is merged at deploy time.
+integrations:
+  github:
+    - host: github.com
+
 catalog:
   import:
     entityFilename: catalog-info.yaml
-    # pullRequestBranchName: rhdh-integration
     pullRequestBranchName: backstage-integration
   rules:
     - allow: [API, Component, User, Group, Location, Resource, System, Template]
@@ -30,8 +41,6 @@ catalog:
     - type: url
       target: https://github.com/redhat-developer/red-hat-developer-hub-software-templates/blob/main/templates.yaml
     - type: file
-      target: ./catalog-entities/users.yaml
-    - type: file
       target: ./catalog-entities/components.yaml
     - type: file
       target: ./catalog-entities/operators.yaml
@@ -39,3 +48,5 @@ catalog:
       target: ./catalog-entities/resources.yaml
     - type: file
       target: ./catalog-entities/plugins.yaml
+    - type: file
+      target: ./catalog-entities/topology-test.yaml

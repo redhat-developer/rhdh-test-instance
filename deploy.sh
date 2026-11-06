@@ -1,28 +1,43 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-# Default values
+# =============================================================================
+# deploy.sh — Deploy an RHDH test instance
+#
+# Usage:
+#   ./deploy.sh <helm|operator> <version> [--namespace <ns>] [--plugins <list>]
+#
+# Versions: 2.2, 2.2.3, 2.2-120-CI, next
+# Plugins:  see "Available plugins" below; "all" enables every optional plugin,
+#           "-name" excludes one (e.g. "all,-orchestrator").
+# =============================================================================
+
 namespace="rhdh"
 installation_method=""
-CV=""
-github=0 # by default don't use the Github repo unless the chart doesn't exist in the OCI registry
-WITH_ORCHESTRATOR=0
+plugins_arg=""
 
-# Parse arguments
-if [[ $# -lt 2 ]]; then
-    echo "Usage: $0 <installation-method> <version> [--namespace <ns>] [--with-orchestrator]"
+usage() {
+    echo "Usage: $0 <installation-method> <version> [--namespace <ns>] [--plugins <list>]"
     echo "Installation methods: helm, operator"
     echo "Options:"
-    echo "  --namespace <ns>       Deploy to specified namespace (default: rhdh)"
-    echo "  --with-orchestrator    Deploy with orchestrator support"
-    echo "  --plugins <list>       Deploy with plugins support (default: none)"
+    echo "  --namespace <ns>    Deploy to the specified namespace (default: rhdh)"
+    echo "  --plugins <list>    Comma-separated optional plugins, 'all', or 'all,-name'"
+    echo "Available plugins: keycloak (always on), kubernetes, bulk-import,"
+    echo "                   intelligent-assistant, orchestrator, scorecard, rbac, lighthouse"
     echo "Examples:"
-    echo "  $0 helm 1.5-171-CI"
-    echo "  $0 helm next"
-    echo "  $0 operator 1.5"
-    echo "  $0 helm 1.9 --with-orchestrator"
-    echo "  $0 helm 1.9 --namespace rhdh-helm --with-orchestrator"
-    echo "  $0 helm 1.9 --plugins keycloak,lighthouse"
+    echo "  $0 helm 2.2"
+    echo "  $0 helm next --plugins kubernetes,rbac"
+    echo "  $0 operator 2.2 --namespace team-a --plugins all,-orchestrator"
+}
+
+ci_comment() {
+    if [[ "${OPENSHIFT_CI}" == "true" ]] && declare -F gh_comment >/dev/null; then
+        gh_comment "$1"
+    fi
+}
+
+if [[ $# -lt 2 ]]; then
+    usage
     exit 1
 fi
 
@@ -30,48 +45,84 @@ installation_method="$1"
 version="$2"
 shift 2
 
-# Parse optional flags
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --namespace)
             namespace="$2"
             shift 2
             ;;
-        --with-orchestrator)
-            WITH_ORCHESTRATOR=1
-            echo "Orchestrator support enabled"
-            shift
-            ;;
         --plugins)
-            PLUGINS="$2"
+            plugins_arg="$2"
             shift 2
+            ;;
+        --with-orchestrator)
+            echo "Warning: --with-orchestrator is deprecated; use --plugins orchestrator." >&2
+            plugins_arg="${plugins_arg:+${plugins_arg},}orchestrator"
+            shift
             ;;
         *)
             echo "Error: Unknown option: $1"
-            echo "Usage: $0 <installation-method> <version> [--namespace <ns>] [--with-orchestrator]"
+            usage
             exit 1
             ;;
     esac
 done
 
-export WITH_ORCHESTRATOR
-
-# Validate installation method
 if [[ "$installation_method" != "helm" && "$installation_method" != "operator" ]]; then
     echo "Error: Installation method must be either 'helm' or 'operator'"
-    echo "Usage: $0 <installation-method> <version>"
-    [[ "$OPENSHIFT_CI" == "true" ]] && gh_comment "❌ **Error: Invalid installation method** 🚫\n\n📝 **Provided installation method:** \`$installation_method\`\n\nInstallation method must be either 'helm' or 'operator' 🔄"
+    ci_comment "❌ **Error: Invalid installation method** 🚫
+
+📝 **Provided installation method:** \`${installation_method}\`
+
+Installation method must be either 'helm' or 'operator' 🔄"
     exit 1
 fi
 
-[[ "${OPENSHIFT_CI}" != "true" ]] && source .env
-# source utils/utils.sh
+source "$(dirname "${BASH_SOURCE[0]}")/scripts/deployment-common.sh"
+
+# Local deployments read secrets and optional settings from .env. CI injects
+# them from Vault (OPENSHIFT_CI=true).
+if [[ "${OPENSHIFT_CI}" != "true" && -f .env ]]; then
+    source .env
+fi
+
+# The command line wins over PLUGINS from .env.
+PLUGINS="${plugins_arg:-${PLUGINS:-}}"
+
+if ! parse_rhdh_version "$version"; then
+    ci_comment "❌ **Error: Invalid RHDH version** 🚫
+
+📝 **Provided version:** \`${version}\`
+
+Use \`2.2\`, a 2.2 patch release, a \`2.2-<build>-CI\` build, or \`next\`."
+    exit 1
+fi
+
+for tool in oc jq yq; do
+    command -v "$tool" >/dev/null || die "Required tool '${tool}' is not installed."
+done
+if [[ "$installation_method" == "helm" ]]; then
+    command -v helm >/dev/null || die "Required tool 'helm' is not installed."
+fi
+
+resolve_plugins "$PLUGINS"
+prepare_deploy_workdir
+
+echo "RHDH version: ${version}"
+echo "Plugins: ${PLUGINS_RESOLVED}"
+
+# Build the merged configuration once. The same files are used by the cluster
+# ConfigMaps and, for Helm, by the chart values.
+export APP_CONFIG_FILE="${DEPLOY_WORKDIR}/app-config-rhdh.yaml"
+export DYNAMIC_PLUGINS_FILE="${DEPLOY_WORKDIR}/dynamic-plugins.yaml"
+build_app_config "$APP_CONFIG_FILE"
+build_dynamic_plugins "$DYNAMIC_PLUGINS_FILE"
 
 # Create or switch to the specified namespace
 oc new-project "$namespace" || oc project "$namespace"
 
 # Resolve cluster router base and RHDH URL early so setup-resources.sh and
-# plugin scripts have them available (e.g. for creating the rhdh-secrets Secret).
+# plugin scripts have them available.
 export CLUSTER_ROUTER_BASE
 CLUSTER_ROUTER_BASE=$(oc get route console -n openshift-console -o=jsonpath='{.spec.host}' | sed 's/^[^.]*\.//')
 if oc get route console -n openshift-console -o=jsonpath='{.spec.tls.termination}' 2>/dev/null | grep -q .; then
@@ -84,46 +135,44 @@ if [[ "$installation_method" == "helm" ]]; then
 else
     export RHDH_BASE_URL="${RHDH_PROTOCOL}://backstage-developer-hub-${namespace}.${CLUSTER_ROUTER_BASE}"
 fi
+export NAMESPACE="$namespace"
+
 echo "RHDH URL: ${RHDH_BASE_URL}"
 
-# Apply cluster resources that are always present (catalog entities, RBAC
-# policies, app-config and dynamic-plugins ConfigMaps, image stream pre-imports,
-# demo workloads). Run before plugin scripts so all base config exists before
-# plugins append to it.
-export NAMESPACE="$namespace"
 source scripts/setup-resources.sh
 setup_resources
 
-export IS_AUTH_ENABLED="${IS_AUTH_ENABLED:-false}"
-
+# Keycloak and every optional plugin. Setup steps run round-robin so one
+# plugin waiting for readiness does not block the others.
 source scripts/config-plugins.sh
-if [[ -n "${PLUGINS:-}" ]]; then
-    main "$PLUGINS"
-fi
-
-# If no auth plugin set IS_AUTH_ENABLED=true, mount the guest auth ConfigMap.
-if [[ "${IS_AUTH_ENABLED}" != "true" ]]; then
-    export GUEST_AUTH_CONFIG_MAP_ENTRY="        - name: app-config-guest-auth"
-else
-    export GUEST_AUTH_CONFIG_MAP_ENTRY=""
-fi
+main "$PLUGINS_RESOLVED"
 
 if [[ "$installation_method" == "helm" ]]; then
     source helm/deploy.sh "$namespace" "$version"
 else
-    # In CI, auto-install the operator if not already present (CI has Linux tools available)
-    # TODO(RHIDP-12127): move operator install and orchestrator support to CI step registry script
-    if [[ "${OPENSHIFT_CI}" == "true" ]] && ! oc get crd/backstages.rhdh.redhat.com &>/dev/null; then
+    # In CI, bootstrap the shared Operator if it is not installed yet.
+    if [[ "${OPENSHIFT_CI}" == "true" ]] && \
+        ! oc get configmap rhdh-default-config -n "${OPERATOR_NAMESPACE:-rhdh-operator-system}" &>/dev/null; then
         echo "Operator not found, installing automatically (CI mode)..."
-        source operator/install-operator.sh "$version"
+        bash operator/install-operator.sh "$version"
     fi
     source operator/deploy.sh "$namespace" "$version"
 fi
 
-# Wait for the deployment to be ready
-oc rollout status deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' -n "$namespace" --timeout=500s || { echo "Error: Timed out waiting for deployment to be ready."; exit 1; }
+if [[ "$installation_method" == "helm" ]]; then
+    deployment_name=redhat-developer-hub
+else
+    deployment_name=backstage-developer-hub
+fi
+
+if ! oc rollout status "deployment/${deployment_name}" -n "$namespace" --timeout=600s; then
+    echo "Error: Timed out waiting for deployment/${deployment_name}." >&2
+    echo "Recent dynamic plugin installation logs:" >&2
+    oc logs "deployment/${deployment_name}" -c install-dynamic-plugins -n "$namespace" --tail=100 >&2 || true
+    exit 1
+fi
 
 echo "
-RHDH_BASE_URL : 
-$RHDH_BASE_URL
+RHDH_BASE_URL :
+${RHDH_BASE_URL}
 "

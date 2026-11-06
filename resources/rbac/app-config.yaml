@@ -1,0 +1,13 @@
+permission:
+  enabled: true
+  rbac:
+    pluginsWithPermission:
+      - catalog
+      - permission
+      - intelligent-assistant
+      - scorecard
+    admin:
+      superUsers:
+        - name: user:default/test1
+    policies-csv-file: /opt/app-root/src/rbac/rbac-policy.csv
+    conditionalPoliciesFile: /opt/app-root/src/rbac/conditional-policy.yaml

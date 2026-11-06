@@ -1,0 +1,3 @@
+# RBAC frontend. The RBAC backend is a direct dependency of the RHDH backend.
+- package: ref://backstage-community-plugin-rbac
+  enabled: true
