@@ -7,7 +7,7 @@ CATALOG_INDEX_IMAGE ?=
 RHDH_IMAGE ?=
 RUNNER_IMAGE ?= quay.io/rhdh-community/rhdh-e2e-runner:main
 KEYCLOAK_NS ?= rhdh-keycloak
-OPERATOR_NAMESPACE ?= rhdh-operator-system
+OPERATOR_NAMESPACE ?= rhdh-operator
 
 export CATALOG_INDEX_TAG
 export CATALOG_INDEX_IMAGE

@@ -120,7 +120,7 @@ resolve_deployment_catalog_image() {
         fi
     elif [[ -z "$RESOLVED_CATALOG_INDEX_IMAGE" ]]; then
         RESOLVED_CATALOG_INDEX_IMAGE=$(oc get configmap rhdh-default-config \
-            -n "${OPERATOR_NAMESPACE:-rhdh-operator-system}" -o json \
+            -n "${OPERATOR_NAMESPACE:-rhdh-operator}" -o json \
             | jq -er '.data["deployment.yaml"]' | yq -o=json '.' | jq -er '
             .spec.template.spec.initContainers[] | select(.name == "install-dynamic-plugins") |
             .env[] | select(.name == "CATALOG_INDEX_IMAGE") | .value') || {

@@ -102,7 +102,7 @@ its cluster-scoped leftovers, and leaves the other instances signed in.
 | `CATALOG_INDEX_TAG` | _(empty)_                                     | Shortcut for `quay.io/rhdh/plugin-catalog-index:<tag>`         |
 | `RHDH_IMAGE`        | chart/Operator default                        | RHDH container image override                                  |
 | `KEYCLOAK_NS`       | `rhdh-keycloak`                               | Namespace of the shared Keycloak                               |
-| `OPERATOR_NAMESPACE`| `rhdh-operator-system`                        | Namespace of the RHDH Operator                                 |
+| `OPERATOR_NAMESPACE`| `rhdh-operator`                        | Namespace of the RHDH Operator                                 |
 | `RUNNER_IMAGE`      | `quay.io/rhdh-community/rhdh-e2e-runner:main` | Container image for `install-operator`                         |
 
 ## Plugins

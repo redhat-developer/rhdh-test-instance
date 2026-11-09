@@ -168,7 +168,7 @@ if [[ "$installation_method" == "helm" ]]; then
 else
     # In CI, bootstrap the shared Operator if it is not installed yet.
     if [[ "${OPENSHIFT_CI}" == "true" ]] && \
-        ! oc get configmap rhdh-default-config -n "${OPERATOR_NAMESPACE:-rhdh-operator-system}" &>/dev/null; then
+        ! oc get configmap rhdh-default-config -n "${OPERATOR_NAMESPACE:-rhdh-operator}" &>/dev/null; then
         echo "Operator not found, installing automatically (CI mode)..."
         bash operator/install-operator.sh "$version"
     fi
