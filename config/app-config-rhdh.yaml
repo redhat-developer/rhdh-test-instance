@@ -37,6 +37,10 @@ backend:
       - 'data:'
 
 auth:
+  # The Operator's default app-config sets auth.environment to development,
+  # while the OIDC provider is configured under 'production'. Keep them aligned
+  # (this file is loaded last for both Helm and Operator).
+  environment: production
   session:
     secret: '${SESSION_SECRET}'
 

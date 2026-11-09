@@ -390,12 +390,13 @@ register_keycloak_client() {
     fi
 
     # Redirect URIs must follow the current instance URL (cluster pool rotation).
+    # Send only the fields we own: the template also carries clientId/name/secret,
+    # and updating those would rename the client (or reset its secret).
     _keycloak_api_call PUT \
       "${KEYCLOAK_URL}/admin/realms/rhdh/clients/${existing_client_uuid}" \
-      "$(jq -c --arg redirect_uri "${rhdh_redirect_uri}" \
-          '.redirectUris = [$redirect_uri] | .webOrigins = [$redirect_uri]' \
-          "${_KEYCLOAK_CLIENT_FILE}")" \
-      "Update client redirect URIs" >/dev/null || true
+      "$(jq -c -n --arg redirect_uri "${rhdh_redirect_uri}" \
+          '{redirectUris: [$redirect_uri], webOrigins: [$redirect_uri]}')" \
+      "Update client redirect URIs" >/dev/null
   fi
 
   # Assign service account roles for the catalog backend plugin.
