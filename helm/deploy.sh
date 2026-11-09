@@ -102,8 +102,8 @@ if plugin_enabled intelligent-assistant; then
     HELM_ARGS+=(--set intelligentAssistant.enabled=true)
     if [[ "${LIGHTSPEED_HAS_PROVIDER:-false}" == "true" ]]; then
         HELM_ARGS+=(
-            --set intelligentAssistant.existingSecret=lightspeed-secret
-            --set intelligentAssistant.config.stack.existingConfigMap.name=lightspeed-stack
+            --set intelligentAssistant.existingSecret=intelligent-assistant-secrets
+            --set intelligentAssistant.config.stack.existingConfigMap.name=intelligent-assistant-stack
             --set intelligentAssistant.config.stack.existingConfigMap.key=lightspeed-stack.yaml
         )
     fi

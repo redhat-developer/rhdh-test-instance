@@ -105,7 +105,18 @@ if [[ "$installation_method" == "helm" ]]; then
     command -v helm >/dev/null || die "Required tool 'helm' is not installed."
 fi
 
-resolve_plugins "$PLUGINS"
+# Resolve CATALOG_INDEX_TAG into CATALOG_INDEX_IMAGE (and strip any oci://).
+resolve_catalog_image
+
+resolve_plugins "$PLUGINS" || {
+    ci_comment "❌ **Error: Invalid plugin list** 🚫
+
+📝 **Provided plugins:** \`${PLUGINS}\`
+
+Use \`kubernetes\`, \`bulk-import\`, \`intelligent-assistant\`, \`orchestrator\`,
+\`scorecard\`, \`rbac\`, \`lighthouse\`, \`all\` or \`all,-name\`."
+    exit 1
+}
 prepare_deploy_workdir
 
 echo "RHDH version: ${version}"
@@ -118,7 +129,12 @@ export DYNAMIC_PLUGINS_FILE="${DEPLOY_WORKDIR}/dynamic-plugins.yaml"
 build_app_config "$APP_CONFIG_FILE"
 build_dynamic_plugins "$DYNAMIC_PLUGINS_FILE"
 
-# Create or switch to the specified namespace
+# Create or switch to the specified namespace.
+# The first label of the generated route host is
+# backstage-developer-hub-<namespace>, which must stay within 63 characters.
+if [[ ${#namespace} -gt 39 ]]; then
+    die "Namespace '${namespace}' is too long (max 39 characters) for the generated route hostname."
+fi
 oc new-project "$namespace" || oc project "$namespace"
 
 # Resolve cluster router base and RHDH URL early so setup-resources.sh and
@@ -148,7 +164,7 @@ source scripts/config-plugins.sh
 main "$PLUGINS_RESOLVED"
 
 if [[ "$installation_method" == "helm" ]]; then
-    source helm/deploy.sh "$namespace" "$version"
+    bash helm/deploy.sh "$namespace" "$version"
 else
     # In CI, bootstrap the shared Operator if it is not installed yet.
     if [[ "${OPENSHIFT_CI}" == "true" ]] && \
@@ -156,7 +172,7 @@ else
         echo "Operator not found, installing automatically (CI mode)..."
         bash operator/install-operator.sh "$version"
     fi
-    source operator/deploy.sh "$namespace" "$version"
+    bash operator/deploy.sh "$namespace" "$version"
 fi
 
 if [[ "$installation_method" == "helm" ]]; then

@@ -1,27 +1,28 @@
 # Scorecard frontend and backend modules.
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard
-  enabled: true
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend
-  enabled: true
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-sonarqube
-  enabled: true
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-jira
-  enabled: false # requires a Jira instance
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-dependabot
-  enabled: true
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-github
-  enabled: true
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-filecheck
-  enabled: true
-  pluginConfig:
-    scorecard:
-      metricProviders:
-        filecheck:
-          fileExistence:
-            options:
-              files:
-                readme: README.md
-                license: LICENSE
-                codeowners: .github/CODEOWNERS
-- package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-openssf
-  enabled: true
+plugins:
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard
+    enabled: true
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend
+    enabled: true
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-sonarqube
+    enabled: true
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-jira
+    enabled: false # requires a Jira instance
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-dependabot
+    enabled: true
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-github
+    enabled: true
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-filecheck
+    enabled: true
+    pluginConfig:
+      scorecard:
+        metricProviders:
+          filecheck:
+            fileExistence:
+              options:
+                files:
+                  readme: README.md
+                  license: LICENSE
+                  codeowners: .github/CODEOWNERS
+  - package: ref://red-hat-developer-hub-backstage-plugin-scorecard-backend-module-openssf
+    enabled: true

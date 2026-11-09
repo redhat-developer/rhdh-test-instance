@@ -73,8 +73,22 @@ make url
 make undeploy-helm                       # keep shared Keycloak and the Operator
 make undeploy-keycloak                   # only when no instances remain
 make uninstall-operator
-make clean                               # delete the namespace
+make clean                               # namespace + cluster-scoped leftovers
 ```
+
+### Test Day (many instances, one cluster)
+
+```bash
+make install-operator VERSION=2.2        # once per cluster
+make deploy-keycloak                     # once: shared Keycloak, realm, test users
+
+make deploy-helm VERSION=2.2 NAMESPACE=td-1
+make deploy-operator VERSION=2.2 NAMESPACE=td-2
+make smoke NAMESPACE=td-1 ABSENT_PLUGINS=intelligent-assistant
+```
+
+`make clean NAMESPACE=td-1` removes the namespace, its Keycloak OIDC client and
+its cluster-scoped leftovers, and leaves the other instances signed in.
 
 ### Variables
 
@@ -110,13 +124,17 @@ everything; `-name` excludes a plugin (`all,-orchestrator`).
 sign-in method for every instance. The plugin name is still accepted for
 compatibility.
 
-Each plugin contributes `resources/<name>/dynamic-plugins.yaml`, optionally
-`resources/<name>/app-config.yaml`, optional cluster resources, and setup steps
-in `scripts/config-plugins.sh`.
+Each plugin contributes `resources/<name>/dynamic-plugins.yaml` (a
+`dynamic-plugins` document with a `plugins:` list, the same layout as the
+Operator flavours), optionally `resources/<name>/app-config.yaml`, optional
+cluster resources, and setup steps in `scripts/config-plugins.sh`.
 
 Base deployments follow the product defaults: no hidden widgets, no copied
-quickstart steps, no catalog overrides. When a default is wrong, file a bug
-rather than override it.
+quickstart steps, no catalog overrides. Backstage replaces arrays when config
+files are merged, so `config/app-config-rhdh.yaml` restates the product's
+`app.extensions` defaults (landing page, search widget, TechDocs add-ons) before
+adding the language list. `make verify-plugins` fails if a product default goes
+missing. When a default is wrong, file a bug rather than override it.
 
 ## Verification
 
@@ -132,6 +150,8 @@ plugin list and images from the rendered manifests, and runs the same
 - conflicting or duplicate plugin configuration
 - plugin images that cannot be pulled
 - pinned overlay images (`bs_<backstage>__…`) that do not match the release
+- `app.extensions` entries that the product defaults require but the base
+  config does not restate
 
 It also renders the Backstage CR and checks the flavour selection.
 
@@ -145,6 +165,19 @@ bash scripts/verify-plugins.sh --version 2.2 --plugins all --native
 The container run remains the authoritative check; GitHub Actions runs it for
 `2.2` and `next` on every PR that touches configuration, weekly, and on demand
 (`.github/workflows/verify-plugins.yaml`).
+
+### Smoke checks on a live instance
+
+`make smoke` drives the deployed instance with Playwright: sign-in through
+Keycloak, `loaded-plugins` API expectations, the home page defaults, the sidebar
+search entry, the language selector, and the routes of the selected plugins.
+
+```bash
+make smoke NAMESPACE=rhdh EXPECT_PLUGINS=kubernetes,rbac ABSENT_PLUGINS=intelligent-assistant
+```
+
+`EXPECT_PLUGINS` defaults to the resolved `PLUGINS` list. The first run needs
+`npx playwright install chromium`. Failures keep a trace in `e2e/results/`.
 
 ## Sign-in and credentials
 
@@ -186,6 +219,7 @@ pull requests.
 │   ├── setup-resources.sh              # Namespace-scoped resources
 │   ├── verify-plugins.sh               # Pre-deployment verification
 │   └── plugins/config-<name>-plugin.sh # Plugin setup/teardown steps
+├── e2e/                                # Playwright smoke checks (make smoke)
 ├── deploy.sh
 ├── teardown.sh
 └── Makefile
@@ -198,8 +232,8 @@ pull requests.
 1. `app-config-rhdh.yaml` — the base config merged with every selected plugin's
    `app-config.yaml`. Maps merge recursively; arrays are replaced, exactly like
    Backstage's own config layering.
-2. `dynamic-plugins.yaml` — `dynamic-plugins.default.yaml` plus the selected
-   plugins' entries.
+2. `dynamic-plugins.yaml` — `config/dynamic-plugins.yaml` (the bundled defaults
+   include and an empty plugin list) plus the selected plugins' entries.
 
 Both are applied as ConfigMaps. Helm receives the plugin list as chart values;
 the Operator reads the ConfigMap. Component plugins shipped by the chart or the

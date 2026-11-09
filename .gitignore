@@ -3,3 +3,9 @@ install-rhdh-catalog-source.sh
 plugin-infra.sh
 .DS_Store
 .claude/
+
+# Playwright smoke suite
+e2e/node_modules/
+e2e/results/
+e2e/playwright-report/
+e2e/test-results/

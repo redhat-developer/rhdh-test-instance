@@ -46,7 +46,7 @@ yq -o=json '.' "${DEPLOY_ROOT}/operator/backstage.yaml" | jq \
                 mountPath: "/opt/app-root/src/rbac"
             }] else [] end) +
             (if $intelligent_assistant and $provider then [{
-                name: "lightspeed-stack",
+                name: "intelligent-assistant-stack",
                 key: "lightspeed-stack.yaml",
                 mountPath: "/app-root",
                 containers: ["lightspeed-core"]
@@ -54,7 +54,7 @@ yq -o=json '.' "${DEPLOY_ROOT}/operator/backstage.yaml" | jq \
         )
     ) |
     if $intelligent_assistant and $provider then
-        .spec.application.extraEnvs.secrets += [{name: "lightspeed-secret", containers: ["lightspeed-core"]}]
+        .spec.application.extraEnvs.secrets += [{name: "intelligent-assistant-secrets", containers: ["lightspeed-core"]}]
     else . end |
     if $image != "" then
         .spec.deployment.patch.spec.template.spec.containers[0].image = $image |

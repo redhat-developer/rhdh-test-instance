@@ -1,6 +1,22 @@
 app:
   baseUrl: '${RHDH_BASE_URL}'
+  # Backstage replaces arrays when config files are merged, so this list hides
+  # the defaults shipped in the RHDH image's app-config.yaml unless they are
+  # restated. Keep the product defaults first and add test-only entries after.
+  # make verify-plugins fails if a product default goes missing.
   extensions:
+    # Product default: the Backstage home page is the landing page.
+    - page:home:
+        config:
+          path: /
+    # Product default: the Backstage search plugin duplicates the RHDH homepage
+    # search bar widget on 1.54.
+    - home-page-widget:search/search-bar: false
+    # Product defaults from the techdocs-module-addons-contrib plugin config.
+    - addon:techdocs/expandable-navigation: false
+    - addon:techdocs/report-issue
+    - addon:techdocs/text-size: false
+    - addon:techdocs/light-box: false
     # Translation testing for Test Day.
     - api:app/app-language:
         config:

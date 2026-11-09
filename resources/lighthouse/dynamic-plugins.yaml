@@ -4,25 +4,26 @@
 #
 # The New Frontend System plugin registers /lighthouse and the availability-
 # filtered entity card itself, so no legacy dynamicRoutes/mountPoints are needed.
-- package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-lighthouse:bs_1.54.9__0.26.0!backstage-community-plugin-lighthouse
-  enabled: true
-- package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-lighthouse-backend:bs_1.54.9__0.27.0!backstage-community-plugin-lighthouse-backend
-  enabled: true
-  pluginConfig:
-    proxy:
-      endpoints:
-        /lighthouse:
-          target: '${LIGHTHOUSE_SVC_URL}'
-          changeOrigin: true
-          # Lighthouse's LighthouseRestApi uses plain fetch() with no Backstage
-          # identity token. 'dangerously-allow-unauthenticated' is required since
-          # the proxy defaults to credentials: require since Backstage 1.26.
-          credentials: dangerously-allow-unauthenticated
+plugins:
+  - package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-lighthouse:bs_1.54.9__0.26.0!backstage-community-plugin-lighthouse
+    enabled: true
+  - package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-community-plugin-lighthouse-backend:bs_1.54.9__0.27.0!backstage-community-plugin-lighthouse-backend
+    enabled: true
+    pluginConfig:
+      proxy:
+        endpoints:
+          /lighthouse:
+            target: '${LIGHTHOUSE_SVC_URL}'
+            changeOrigin: true
+            # Lighthouse's LighthouseRestApi uses plain fetch() with no Backstage
+            # identity token. 'dangerously-allow-unauthenticated' is required since
+            # the proxy defaults to credentials: require since Backstage 1.26.
+            credentials: dangerously-allow-unauthenticated
 
-    lighthouse:
-      baseUrl: ${LIGHTHOUSE_URL}
-      schedule:
-        frequency:
-          hours: 12
-        timeout:
-          minutes: 30
+      lighthouse:
+        baseUrl: ${LIGHTHOUSE_URL}
+        schedule:
+          frequency:
+            hours: 12
+          timeout:
+            minutes: 30

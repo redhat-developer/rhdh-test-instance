@@ -75,10 +75,17 @@ and the Operator flavours; do not duplicate them in `dynamic-plugins.yaml`.
 - **Defaults first.** Do not override product defaults in the base config. If a
   default is broken, file a bug instead of hiding it (this is why the sidebar
   search button is not hidden).
+- **`app.extensions` is restated.** Backstage replaces arrays across config
+  files, so `config/app-config-rhdh.yaml` repeats the product defaults
+  (`page:home`, the duplicate search widget toggle, the TechDocs add-ons) before
+  adding the language list. `make verify-plugins` fails on drift.
 - **`ref://` for bundled plugins.** Entries available in the catalog use
   `ref://`. Plugins missing from the catalog (MCP actions backend, Lighthouse)
   use pinned overlay images with explicit `bs_<backstage>__<version>` tags.
   `make verify-plugins` checks the pins against the release's Backstage version.
+- **Per-plugin files are `plugins:` documents.** `resources/<name>/dynamic-plugins.yaml`
+  has the same layout as the Operator flavours: a `plugins:` list, merged by
+  `build_dynamic_plugins`.
 - **Both install methods must work.** Component plugins come from the chart or
   the Operator flavour so Helm and Operator stay aligned.
 - **`SEGMENT_TEST_MODE=true`** is set for both methods.
@@ -108,7 +115,21 @@ and validates the Operator CR. It needs `helm`, `yq`, `jq` and `podman`
 make deploy-helm VERSION=2.2 PLUGINS=kubernetes,rbac
 make deploy-operator VERSION=2.2 PLUGINS=all,-orchestrator
 make install-operator VERSION=2.2      # one-time per cluster, runs in a container
+make deploy-keycloak                   # one-time: shared Keycloak, realm, users
 make undeploy-helm                     # keeps shared Keycloak and the Operator
 make undeploy-keycloak                 # only when no instances remain
 make status logs url
+make smoke NAMESPACE=rhdh              # Playwright checks against a live instance
 ```
+
+## Intelligent Assistant specifics
+
+- OKP is not supported: the no-OKP stack (`lightspeed-stack-no-okp.yaml`) is
+  always used when a provider is configured.
+- Object names: `intelligent-assistant-stack` ConfigMap (key
+  `lightspeed-stack.yaml`), `intelligent-assistant-secrets` Secret,
+  `rhdh-intelligent-assistant-egress` NetworkPolicy,
+  `INTELLIGENT_ASSISTANT_STACK_FILE` env override.
+- The MCP actions backend is pinned in
+  `resources/intelligent-assistant/dynamic-plugins.yaml`; plugin-side app-config
+  (DCR, static token, action sources) lives in its `app-config.yaml`.

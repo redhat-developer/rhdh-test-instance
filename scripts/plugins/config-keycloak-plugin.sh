@@ -161,41 +161,55 @@ _keycloak_refresh_admin_token() {
 deploy_keycloak() {
   oc create namespace "${KEYCLOAK_NS}" --dry-run=client -o yaml | oc apply -f - >/dev/null
 
-  if oc get secret keycloak-credentials --namespace="${KEYCLOAK_NS}" &>/dev/null; then
-    echo "keycloak-credentials already exists in ${KEYCLOAK_NS} — skipping generation."
-  else
-    echo "Generating keycloak-credentials Secret in ${KEYCLOAK_NS}..."
-    local kc_admin_password kc_db_password
-    kc_admin_password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-    kc_db_password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-
-    oc create secret generic keycloak-credentials \
-      --from-literal=admin-password="${kc_admin_password}" \
-      --from-literal=KEYCLOAK_ADMIN_PASSWORD="${kc_admin_password}" \
-      --from-literal=postgres-password="${kc_db_password}" \
-      --from-literal=password="${kc_db_password}" \
-      --namespace="${KEYCLOAK_NS}"
+  # On a shared cluster every instance deploy runs this step. Re-running the
+  # Helm release concurrently fails with "another operation in progress", so
+  # an already running Keycloak is reused as-is.
+  local keycloak_ready=false
+  if [[ "$(oc get statefulset "${_KEYCLOAK_RELEASE_NAME}" \
+      --namespace="${KEYCLOAK_NS}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)" == "1" ]]; then
+    keycloak_ready=true
+    echo "Keycloak is already running in ${KEYCLOAK_NS} — skipping install."
   fi
 
-  echo "Importing Keycloak images into ${KEYCLOAK_NS}..."
-  local import_dir="${DEPLOY_ROOT}/resources/image-stream-imports"
-  for f in keycloak-legacy-import.yaml postgesql-legacy-import.yaml; do
-    if [[ -f "${import_dir}/${f}" ]]; then
-      oc apply -f "${import_dir}/${f}" --namespace="${KEYCLOAK_NS}" >/dev/null || \
-        echo "  Warning: Failed to import ${f} — continuing."
+  if [[ "${keycloak_ready}" == "false" ]]; then
+    if oc get secret keycloak-credentials --namespace="${KEYCLOAK_NS}" &>/dev/null; then
+      echo "keycloak-credentials already exists in ${KEYCLOAK_NS} — skipping generation."
+    else
+      echo "Generating keycloak-credentials Secret in ${KEYCLOAK_NS}..."
+      local kc_admin_password kc_db_password
+      kc_admin_password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+      kc_db_password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+
+      oc create secret generic keycloak-credentials \
+        --from-literal=admin-password="${kc_admin_password}" \
+        --from-literal=KEYCLOAK_ADMIN_PASSWORD="${kc_admin_password}" \
+        --from-literal=postgres-password="${kc_db_password}" \
+        --from-literal=password="${kc_db_password}" \
+        --namespace="${KEYCLOAK_NS}"
     fi
-  done
 
-  helm repo add bitnami https://charts.bitnami.com/bitnami --force-update >/dev/null
-  helm repo update >/dev/null
+    echo "Importing Keycloak images into ${KEYCLOAK_NS}..."
+    local import_dir="${DEPLOY_ROOT}/resources/image-stream-imports"
+    for f in keycloak-legacy-import.yaml postgesql-legacy-import.yaml; do
+      if [[ -f "${import_dir}/${f}" ]]; then
+        oc apply -f "${import_dir}/${f}" --namespace="${KEYCLOAK_NS}" >/dev/null || \
+          echo "  Warning: Failed to import ${f} — continuing."
+      fi
+    done
 
-  echo "Deploying Keycloak via Helm into ${KEYCLOAK_NS}..."
-  # keycloak-values.yaml uses ${NAMESPACE} for internal registry paths — override
-  # it so envsubst substitutes the Keycloak namespace, not the RHDH instance NS.
-  helm upgrade --install "${_KEYCLOAK_RELEASE_NAME}" bitnami/keycloak \
-    --namespace "${KEYCLOAK_NS}" \
-    --values <(NAMESPACE="${KEYCLOAK_NS}" envsubst < "${_KEYCLOAK_VALUES_FILE}")
+    helm repo add bitnami https://charts.bitnami.com/bitnami --force-update >/dev/null
+    helm repo update >/dev/null
 
+    echo "Deploying Keycloak via Helm into ${KEYCLOAK_NS}..."
+    # keycloak-values.yaml uses ${NAMESPACE} for internal registry paths — override
+    # it so envsubst substitutes the Keycloak namespace, not the RHDH instance NS.
+    helm upgrade --install "${_KEYCLOAK_RELEASE_NAME}" bitnami/keycloak \
+      --namespace "${KEYCLOAK_NS}" \
+      --values <(NAMESPACE="${KEYCLOAK_NS}" envsubst < "${_KEYCLOAK_VALUES_FILE}")
+  fi
+
+  # The route is applied every time so a deleted or stale route is repaired
+  # without touching the running release.
   echo "Creating OpenShift Route (HTTP) in ${KEYCLOAK_NS}..."
   oc apply -f - --namespace="${KEYCLOAK_NS}" <<EOF
 apiVersion: route.openshift.io/v1

@@ -193,10 +193,10 @@ teardown_resources() {
   oc delete secret rhdh-secrets --namespace="${NAMESPACE}" 2>/dev/null || true
 
   echo "Removing RHDH ConfigMaps and secrets..."
-  oc delete configmap app-config-rhdh dynamic-plugins lightspeed-stack \
+  oc delete configmap app-config-rhdh dynamic-plugins intelligent-assistant-stack \
     --namespace="${NAMESPACE}" 2>/dev/null || true
-  oc delete secret lightspeed-secret --namespace="${NAMESPACE}" 2>/dev/null || true
-  oc delete networkpolicy rhdh-lighthouse-egress rhdh-llm-egress \
+  oc delete secret intelligent-assistant-secrets --namespace="${NAMESPACE}" 2>/dev/null || true
+  oc delete networkpolicy rhdh-lighthouse-egress rhdh-intelligent-assistant-egress \
     --namespace="${NAMESPACE}" 2>/dev/null || true
 
   echo "Removing catalog entity ConfigMaps..."
@@ -207,6 +207,11 @@ teardown_resources() {
   echo "Removing RBAC policy ConfigMap..."
   oc delete -f "${ROOT_DIR}/resources/rbac/rbac-policies.yaml" \
     --namespace="${NAMESPACE}" 2>/dev/null || true
+
+  echo "Removing cluster-scoped resources for this instance..."
+  # Cluster-scoped, so it survives namespace deletion. Removed here so a
+  # teardown without --plugins kubernetes does not leave it behind.
+  oc delete clusterrolebinding "rhdh-kubernetes-plugin-${NAMESPACE}" 2>/dev/null || true
 
   echo "Removing demo resources..."
   local examples_dir="${ROOT_DIR}/resources/rhdh-script-examples"

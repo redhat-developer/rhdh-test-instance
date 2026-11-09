@@ -17,15 +17,20 @@ Read `README.md` and `CLAUDE.md` first; they are the source of truth.
 1. `app-config-rhdh.yaml` — `config/app-config-rhdh.yaml` merged with every
    selected plugin's `resources/<plugin>/app-config.yaml`. Maps merge; arrays
    are replaced.
-2. `dynamic-plugins.yaml` — `includes: [dynamic-plugins.default.yaml]` plus the
-   selected plugins' `resources/<plugin>/dynamic-plugins.yaml`.
+2. `dynamic-plugins.yaml` — `config/dynamic-plugins.yaml` (includes the bundled
+   defaults) plus the selected plugins' `resources/<plugin>/dynamic-plugins.yaml`,
+   each a document with a `plugins:` list (same layout as the Operator
+   flavours).
 
 Plugins are enabled by name: `kubernetes`, `bulk-import`,
 `intelligent-assistant`, `orchestrator`, `scorecard`, `rbac`, `lighthouse`
-(`all`, `all,-orchestrator`). `keycloak` is always on.
+(`all`, `all,-orchestrator`). `keycloak` is always on. Unknown names fail the
+deployment.
 
 Orchestrator and Intelligent Assistant dynamic plugins come from the Helm chart
 and the Operator flavours. Never list them again in `dynamic-plugins.yaml`.
+Intelligent Assistant is off unless selected; OKP is not supported, so a
+configured provider always renders the no-OKP stack.
 
 ### Adding a plugin
 
@@ -53,6 +58,9 @@ and the Operator flavours. Never list them again in `dynamic-plugins.yaml`.
 - Do not override product defaults in the base configuration: no hidden
   widgets, no copied quickstart steps, no catalog overrides. Broken defaults are
   bugs, not configuration problems.
+- `app.extensions` arrays are replaced across config files: when adding one,
+  restate the product defaults (`page:home`, the duplicate search widget toggle,
+  the TechDocs add-ons). `make verify-plugins` fails on drift.
 - Do not pin versions for plugins that the catalog provides; use `ref://`.
 - Configuration shared by all deployments belongs in
   `config/app-config-rhdh.yaml`; plugin-specific configuration belongs in the
@@ -81,10 +89,19 @@ Prow forwards only `--plugins`; do not expect other flags to reach `deploy.sh`.
 make deploy-helm VERSION=2.2 PLUGINS=kubernetes,rbac
 make deploy-operator VERSION=2.2 PLUGINS=all,-orchestrator
 make install-operator VERSION=2.2     # once per cluster, containerized
+make deploy-keycloak                  # once per cluster: shared Keycloak + test users
 make verify-plugins VERSION=2.2 PLUGINS=all
 ```
 
 Add `--native` to `scripts/verify-plugins.sh` on Apple Silicon.
+
+### Test Day
+
+Many instances, one cluster: run `make install-operator` and
+`make deploy-keycloak` once, then deploy each namespace. Keycloak install is
+skipped when it is already running, so parallel deploys do not race.
+`make clean NAMESPACE=<ns>` removes only that instance (namespace, OIDC client,
+ClusterRoleBinding).
 
 ### Versions
 
@@ -97,6 +114,7 @@ Operator channel are derived from the version; nothing is hardcoded per build.
 make status
 make logs
 make url
+make smoke NAMESPACE=<ns> EXPECT_PLUGINS=kubernetes,rbac ABSENT_PLUGINS=intelligent-assistant
 ```
 
 Sign in through Keycloak: `test1` / `test1@123` (admin), `test2` / `test2@123`
@@ -107,9 +125,14 @@ OIDC client.
 
 `make verify-plugins` renders the Helm deployment with the real values and runs
 the same `install-dynamic-plugins` installer as the init container. It fails on
-unresolvable `ref://` entries, conflicting configuration, pull failures and
-`bs_` tag drift, and validates the Operator CR. GitHub Actions runs it for `2.2`
-and `next` on configuration PRs, weekly, and on demand.
+unresolvable `ref://` entries, conflicting configuration, pull failures,
+`bs_` tag drift and `app.extensions` defaults that are not restated, and
+validates the Operator CR. GitHub Actions runs it for `2.2` and `next` on
+configuration PRs, weekly, and on demand.
+
+`make smoke` verifies a live instance with Playwright: Keycloak sign-in,
+`loaded-plugins`, home page defaults, sidebar search, the language selector and
+the selected plugins' routes.
 
 Always run it before proposing a configuration change. Do not report a
 deployment as verified without it.

@@ -143,6 +143,38 @@ if [[ -n "$pinned_versions" ]]; then
     echo "Pinned overlay images match Backstage ${bs_version}."
 fi
 
+# ── Check that product app.extensions defaults are restated ──────────────────
+# Backstage replaces arrays when config files are merged, so any app.extensions
+# entry here hides the product's list. The base config must restate it.
+echo "Checking app.extensions against the product defaults..."
+required_extensions="${DEPLOY_WORKDIR}/required-extensions.jsonl"
+our_extensions="${DEPLOY_WORKDIR}/our-extensions.jsonl"
+: > "$required_extensions"
+
+product_branch_config="${DEPLOY_WORKDIR}/product-app-config.yaml"
+curl -fsSL "https://raw.githubusercontent.com/redhat-developer/rhdh/${bs_branch}/app-config.yaml" \
+    -o "$product_branch_config" || die "Could not fetch the product app-config.yaml for ${bs_branch}."
+yq -o=json '.app.extensions // []' "$product_branch_config" | jq -c '.[]' >> "$required_extensions"
+
+installer_app_config="${install_dir}/app-config.dynamic-plugins.yaml"
+if [[ -f "$installer_app_config" ]]; then
+    yq -o=json '.app.extensions // []' "$installer_app_config" | jq -c '.[]' >> "$required_extensions"
+fi
+
+yq -o=json '.app.extensions // []' "$APP_CONFIG_FILE" | jq -c '.[]' > "$our_extensions"
+missing_default=0
+while IFS= read -r entry; do
+    [[ -z "$entry" ]] && continue
+    if ! grep -qxF -- "$entry" "$our_extensions"; then
+        echo "  Missing product default in app.extensions: ${entry}" >&2
+        missing_default=1
+    fi
+done < "$required_extensions"
+if [[ "$missing_default" != "0" ]]; then
+    die "config/app-config-rhdh.yaml must restate the product app.extensions defaults (arrays are replaced when config files are merged)."
+fi
+echo "app.extensions keeps the product defaults."
+
 # ── Validate the Operator CR that will be applied ────────────────────────────
 expected_orchestrator=false
 expected_intelligent_assistant=false

@@ -1,0 +1,13 @@
+{
+  "name": "rhdh-test-instance-smoke",
+  "private": true,
+  "type": "module",
+  "description": "Playwright smoke checks for a deployed RHDH test instance",
+  "scripts": {
+    "test": "playwright test",
+    "install-browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0"
+  }
+}

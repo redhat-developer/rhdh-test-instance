@@ -237,7 +237,7 @@ resolve_plugins() {
     local spec="${1:-}" include_always_on=true token name
     [[ "${2:-}" == "--no-always-on" ]] && include_always_on=false
     local -A selected=()
-    local -a add=() remove=()
+    local -a add=() remove=() tokens
 
     IFS=',' read -ra tokens <<< "$spec"
     for token in "${tokens[@]}"; do
@@ -254,15 +254,15 @@ resolve_plugins() {
 
     for name in "${add[@]}"; do
         if [[ " ${PLUGIN_NAMES[*]} " != *" ${name} "* ]]; then
-            echo "Warning: Unknown plugin '${name}'. Available: ${PLUGIN_NAMES[*]}" >&2
-            continue
+            echo "Error: Unknown plugin '${name}'. Available plugins: ${PLUGIN_NAMES[*]}." >&2
+            return 1
         fi
         selected["$name"]=1
     done
     for name in "${remove[@]}"; do
         if [[ " ${PLUGIN_NAMES[*]} " != *" ${name} "* ]]; then
-            echo "Warning: Unknown plugin '${name}' in exclusion list." >&2
-            continue
+            echo "Error: Unknown plugin '${name}' in the exclusion list. Available plugins: ${PLUGIN_NAMES[*]}." >&2
+            return 1
         fi
         unset "selected[${name}]"
     done
@@ -305,22 +305,32 @@ plugin_app_config_files() {
 }
 
 # build_dynamic_plugins <output> — dynamic-plugins.yaml with all selected
-# plugin entries. Component plugins provided by the Helm chart or Operator
-# flavours (orchestrator, intelligent-assistant) contribute no entries here.
+# plugin entries. Starts from config/dynamic-plugins.yaml (includes + plugins)
+# and appends each selected plugin's resources/<name>/dynamic-plugins.yaml,
+# which must be a document with a plugins: list (same layout as the plugin
+# catalog and the Operator flavours). Component plugins provided by the Helm
+# chart or Operator flavours (orchestrator, intelligent-assistant) contribute
+# no entries here.
 build_dynamic_plugins() {
     local output="$1" file
     local merged="${DEPLOY_WORKDIR:-$(dirname "$output")}/plugins.json"
-    echo '[]' > "$merged"
+    local base="${DEPLOY_ROOT}/config/dynamic-plugins.yaml"
+
+    yq -o=json '.' "$base" \
+        | jq '{includes: (.includes // ["dynamic-plugins.default.yaml"]), plugins: (.plugins // [])}' > "$merged"
+
     while IFS= read -r file; do
         [[ -n "$file" ]] || continue
-        yq -o=json '.' "$file" > "${merged}.new"
-        jq -s '.[0] + .[1]' "$merged" "${merged}.new" > "${merged}.tmp"
+        if [[ "$(yq '.plugins | tag' "$file" 2>/dev/null)" != "!!seq" ]]; then
+            die "${file} must be a dynamic-plugins document with a 'plugins:' list."
+        fi
+        yq -o=json '.plugins' "$file" > "${merged}.new"
+        jq -s '.[1] as $new | .[0] | .plugins += $new' "$merged" "${merged}.new" > "${merged}.tmp"
         mv "${merged}.tmp" "$merged"
         rm -f "${merged}.new"
     done < <(plugin_dynamic_config_files)
 
-    jq '{includes: ["dynamic-plugins.default.yaml"], plugins: .}' "$merged" \
-        | yq -p=json -o=yaml '.' > "$output"
+    yq -p=json -o=yaml '.' "$merged" > "$output"
 }
 
 # build_app_config <output> — app-config-rhdh.yaml merged from the base config

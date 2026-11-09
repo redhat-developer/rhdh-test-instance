@@ -73,6 +73,9 @@ endif
 undeploy-keycloak: ## Remove the shared Keycloak (only after all instances are gone)
 	TEARDOWN=true NAMESPACE=$(NAMESPACE) KEYCLOAK_NS=$(KEYCLOAK_NS) bash scripts/config-plugins.sh keycloak
 
+deploy-keycloak: ## Pre-create the shared Keycloak, realm and test users (run once before Test Day)
+	NAMESPACE=$(NAMESPACE) KEYCLOAK_NS=$(KEYCLOAK_NS) bash -c 'source scripts/config-plugins.sh; deploy_keycloak; create_users_and_groups_keycloak'
+
 undeploy-infra: ## Uninstall orchestrator infra chart
 	helm uninstall orchestrator-infra -n $(NAMESPACE) || true
 
@@ -80,15 +83,32 @@ uninstall-operator: ## Uninstall the RHDH operator (deletes the operator namespa
 	oc delete project $(OPERATOR_NAMESPACE) --ignore-not-found
 	@echo "Operator uninstalled. RHDH CRDs may linger until all Backstage CRs are removed."
 
-clean: ## Delete the entire deployment namespace (does NOT uninstall the operator or Keycloak)
+clean: ## Delete the namespace and the instance's cluster-scoped resources (keeps Keycloak and the operator)
+	@TEARDOWN=true NAMESPACE=$(NAMESPACE) KEYCLOAK_NS=$(KEYCLOAK_NS) TIMEOUT=0 \
+		bash -c 'source scripts/config-plugins.sh; uninstall_keycloak' || \
+		echo "Warning: Could not remove the Keycloak client for $(NAMESPACE)."
+	oc delete clusterrolebinding rhdh-kubernetes-plugin-$(NAMESPACE) --ignore-not-found
 	oc delete project $(NAMESPACE) --ignore-not-found
 
 # ── Verification ──────────────────────────────────────────────────────────────
 
-.PHONY: verify-plugins
+.PHONY: verify-plugins smoke
 
 verify-plugins: ## Render the deployment and run the real plugin installer locally (requires podman)
 	bash scripts/verify-plugins.sh --version $(VERSION) --plugins "$(PLUGINS)"
+
+# Route lookup shared by url and smoke (Helm and Operator).
+RHDH_ROUTE_CMD = oc get route -n $(NAMESPACE) -o jsonpath='{range .items[*]}{.spec.to.name}{" "}{.spec.host}{"\n"}{end}' | awk '/^(redhat|backstage)-developer-hub /{print "https://" $$2; exit}'
+
+EXPECT_PLUGINS ?=
+ABSENT_PLUGINS ?=
+
+smoke: ## Playwright smoke checks against a deployed instance (EXPECT_PLUGINS / ABSENT_PLUGINS optional)
+	@cd e2e && { [ -d node_modules ] || npm ci; }
+	@cd e2e && RHDH_BASE_URL="$$($(RHDH_ROUTE_CMD))" \
+		EXPECT_PLUGINS="$(if $(EXPECT_PLUGINS),$(EXPECT_PLUGINS),$$(cd $(CURDIR) && bash -c 'source scripts/deployment-common.sh; resolve_plugins "$(PLUGINS)" >/dev/null && printf %s "$$PLUGINS_RESOLVED"'))" \
+		ABSENT_PLUGINS="$(ABSENT_PLUGINS)" \
+		npx playwright test
 
 # ── Status ────────────────────────────────────────────────────────────────────
 
@@ -104,12 +124,11 @@ status: ## Show deployment status
 	@echo "=== Orchestrator Operators ==="
 	@oc get csv -n openshift-serverless-logic -o custom-columns='NAME:.metadata.name,VERSION:.spec.version,PHASE:.status.phase' 2>/dev/null || echo "Not installed"
 
-logs: ## Tail RHDH pod logs
-	oc logs -f -l 'app.kubernetes.io/name=developer-hub' -n $(NAMESPACE) --tail=100
+logs: ## Tail RHDH pod logs (works for Helm and Operator)
+	oc logs -f -l backstage.io/kubernetes-id=developer-hub -n $(NAMESPACE) --tail=100 -c backstage-backend
 
-url: ## Print the RHDH URL
-	@CLUSTER_ROUTER_BASE=$$(oc get route console -n openshift-console -o=jsonpath='{.spec.host}' | sed 's/^[^.]*\.//'); \
-	echo "https://redhat-developer-hub-$(NAMESPACE).$${CLUSTER_ROUTER_BASE}"
+url: ## Print the RHDH URL (works for Helm and Operator)
+	@$(RHDH_ROUTE_CMD)
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
