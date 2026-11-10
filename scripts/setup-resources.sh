@@ -196,7 +196,7 @@ teardown_resources() {
   oc delete configmap app-config-rhdh dynamic-plugins intelligent-assistant-stack \
     --namespace="${NAMESPACE}" 2>/dev/null || true
   oc delete secret intelligent-assistant-secrets --namespace="${NAMESPACE}" 2>/dev/null || true
-  oc delete networkpolicy rhdh-lighthouse-egress rhdh-intelligent-assistant-egress \
+  oc delete networkpolicy rhdh-lighthouse-egress rhdh-intelligent-assistant-egress rhdh-keycloak-egress \
     --namespace="${NAMESPACE}" 2>/dev/null || true
 
   echo "Removing catalog entity ConfigMaps..."

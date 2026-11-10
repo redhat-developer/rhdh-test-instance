@@ -147,21 +147,26 @@ fi
 # Backstage replaces arrays when config files are merged, so any app.extensions
 # entry here hides the product's list. The base config must restate it.
 echo "Checking app.extensions against the product defaults..."
-required_extensions="${DEPLOY_WORKDIR}/required-extensions.jsonl"
-our_extensions="${DEPLOY_WORKDIR}/our-extensions.jsonl"
+required_extensions="${DEPLOY_WORKDIR}/required-extensions.txt"
+our_extensions="${DEPLOY_WORKDIR}/our-extensions.txt"
 : > "$required_extensions"
 
 product_branch_config="${DEPLOY_WORKDIR}/product-app-config.yaml"
 curl -fsSL "https://raw.githubusercontent.com/redhat-developer/rhdh/${bs_branch}/app-config.yaml" \
     -o "$product_branch_config" || die "Could not fetch the product app-config.yaml for ${bs_branch}."
-yq -o=json '.app.extensions // []' "$product_branch_config" | jq -c '.[]' >> "$required_extensions"
+yq -o=json '.app.extensions // []' "$product_branch_config" \
+    | jq -r '.[] | if type == "object" then keys[0] else . end' >> "$required_extensions"
 
 installer_app_config="${install_dir}/app-config.dynamic-plugins.yaml"
 if [[ -f "$installer_app_config" ]]; then
-    yq -o=json '.app.extensions // []' "$installer_app_config" | jq -c '.[]' >> "$required_extensions"
+    yq -o=json '.app.extensions // []' "$installer_app_config" \
+        | jq -r '.[] | if type == "object" then keys[0] else . end' >> "$required_extensions"
 fi
 
-yq -o=json '.app.extensions // []' "$APP_CONFIG_FILE" | jq -c '.[]' > "$our_extensions"
+# Compare extension types (keys), not values: the test instance overrides some
+# values on purpose (for example page:home: false).
+yq -o=json '.app.extensions // []' "$APP_CONFIG_FILE" \
+    | jq -r '.[] | if type == "object" then keys[0] else . end' > "$our_extensions"
 missing_default=0
 while IFS= read -r entry; do
     [[ -z "$entry" ]] && continue

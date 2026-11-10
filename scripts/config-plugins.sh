@@ -22,7 +22,7 @@ for file in "${DIR}"/plugins/*.sh; do source "$file"; done
 # Plugin name -> setup functions. ":" marks a config-only plugin.
 # shellcheck disable=SC2034 # used indirectly through a nameref
 declare -A PLUGIN_SETUP_FUNCTIONS=(
-  [keycloak]="deploy_keycloak create_users_and_groups_keycloak register_keycloak_client config_secrets_for_keycloak_plugins apply_keycloak_labels"
+  [keycloak]="deploy_keycloak create_users_and_groups_keycloak register_keycloak_client config_secrets_for_keycloak_plugins apply_keycloak_egress_policy apply_keycloak_labels"
   [kubernetes]="apply_kubernetes_plugin_rbac"
   [bulk-import]=":"
   [intelligent-assistant]="setup_intelligent_assistant"

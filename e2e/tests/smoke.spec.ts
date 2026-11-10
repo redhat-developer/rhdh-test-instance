@@ -49,22 +49,24 @@ test.describe("authenticated", () => {
     }
   });
 
-  test("home page renders without duplicate search boxes", async ({ page }) => {
+  test("home page renders the RHDH homepage", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("h1, h2").first()).toBeVisible({ timeout: 60_000 });
-
-    // The Backstage search plugin's home widget duplicates the RHDH homepage
-    // search bar on 1.54 and is disabled in the base configuration.
-    expect(await page.getByRole("textbox").count()).toBeLessThanOrEqual(1);
+    // page:home is disabled, so the RHDH homepage is the only Home destination
+    // in the sidebar (the global header logo is also a Home link).
+    await expect(
+      page
+        .getByRole("navigation", { name: "sidebar nav" })
+        .getByRole("link", { name: "Home", exact: true }),
+    ).toHaveCount(1, { timeout: 60_000 });
+    // customizable: false renders the default widgets instead of the empty state.
+    await expect(page.getByText("No widgets added")).toHaveCount(0);
   });
 
-  test("sidebar search is not hidden", async ({ page }) => {
+  test("global search is available", async ({ page }) => {
     await page.goto("/");
-    const search = page
-      .getByRole("link", { name: /search/i })
-      .or(page.getByRole("button", { name: /search/i }))
-      .first();
+    const search = page.getByPlaceholder(/search/i).first();
     await expect(search).toBeVisible({ timeout: 60_000 });
+    await search.fill("catalog");
   });
 
   test("user settings exposes the language selector", async ({ page }) => {

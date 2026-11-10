@@ -486,7 +486,36 @@ config_secrets_for_keycloak_plugins() {
 }
 
 # =============================================================================
-# Step 5: Apply backstage.io/kubernetes-id labels on Keycloak resources
+# Step 5: Allow HTTP egress to the Keycloak route
+#
+# RHDH 2.2 installs a default-deny NetworkPolicy plus an allow-https-egress
+# policy (443/6443). The shared Keycloak uses a plain HTTP route, so the OIDC
+# metadata discovery and token exchange time out without an explicit port 80
+# egress rule.
+# =============================================================================
+apply_keycloak_egress_policy() {
+  echo "Allowing HTTP egress to the Keycloak route in ${NAMESPACE}..."
+  oc apply -f - --namespace="${NAMESPACE}" <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rhdh-keycloak-egress
+spec:
+  podSelector:
+    matchLabels:
+      backstage.io/kubernetes-id: developer-hub
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 80
+EOF
+  echo "Keycloak egress policy applied!"
+}
+
+# =============================================================================
+# Step 6: Apply backstage.io/kubernetes-id labels on Keycloak resources
 # =============================================================================
 apply_keycloak_labels() {
   echo "Applying Kubernetes labels for Keycloak resources in ${KEYCLOAK_NS}..."

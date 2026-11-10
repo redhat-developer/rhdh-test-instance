@@ -2,13 +2,25 @@ app:
   baseUrl: '${RHDH_BASE_URL}'
   # Backstage replaces arrays when config files are merged, so this list hides
   # the defaults shipped in the RHDH image's app-config.yaml unless they are
-  # restated. Keep the product defaults first and add test-only entries after.
-  # make verify-plugins fails if a product default goes missing.
+  # restated. Keep the product defaults that still apply and use the RHDH CI
+  # homepage layout: the image enables page:home and leaves the RHDH homepage
+  # in customizable mode, which registers two Home destinations and shows an
+  # empty homepage until widgets are added.
+  # make verify-plugins fails if a product default key goes missing.
   extensions:
-    # Product default: the Backstage home page is the landing page.
-    - page:home:
+    - page:home: false
+    - page:homepage:
         config:
           path: /
+          title: Home
+    - home-page-layout:homepage/dynamic-homepage-layout:
+        config:
+          customizable: false
+    - api:home/visits: true
+    - app-root-element:home/visit-listener: true
+    - translation:app/homepage-translations
+    - app-root-wrapper:app/global-header
+    - translation:app/global-header-translations
     # Product default: the Backstage search plugin duplicates the RHDH homepage
     # search bar widget on 1.54.
     - home-page-widget:search/search-bar: false
