@@ -105,17 +105,16 @@ verify-plugins: ## Render the deployment and run the real plugin installer local
 	bash scripts/verify-plugins.sh --version $(VERSION) --plugins "$(PLUGINS)"
 
 # Route lookup shared by url and smoke (Helm and Operator).
-RHDH_ROUTE_CMD = oc get route -n $(NAMESPACE) -o jsonpath='{range .items[*]}{.spec.to.name}{" "}{.spec.host}{"\n"}{end}' | awk '/^(redhat|backstage)-developer-hub /{print "https://" $$2; exit}'
+RHDH_ROUTE_CMD = oc get route -n $(NAMESPACE) -o jsonpath='{range .items[*]}{.spec.to.name}{" "}{.spec.host}{" "}{.spec.tls.termination}{"\n"}{end}' | awk '/^(redhat|backstage)-developer-hub /{proto=($$3=="")?"http":"https"; print proto"://"$$2; exit}'
 
 EXPECT_PLUGINS ?=
 ABSENT_PLUGINS ?=
 
 smoke: ## Playwright smoke checks against a deployed instance (EXPECT_PLUGINS / ABSENT_PLUGINS optional)
-	@cd e2e && { [ -d node_modules ] || npm ci; }
-	@cd e2e && RHDH_BASE_URL="$$($(RHDH_ROUTE_CMD))" \
-		EXPECT_PLUGINS="$(if $(EXPECT_PLUGINS),$(EXPECT_PLUGINS),$$(cd $(CURDIR) && bash -c 'source scripts/deployment-common.sh; resolve_plugins "$(PLUGINS)" >/dev/null && printf %s "$$PLUGINS_RESOLVED"'))" \
-		ABSENT_PLUGINS="$(ABSENT_PLUGINS)" \
-		npx playwright test
+	@RHDH_BASE_URL="$$($(RHDH_ROUTE_CMD))" \
+		EXPECT_PLUGINS="$(EXPECT_PLUGINS)" ABSENT_PLUGINS="$(ABSENT_PLUGINS)" PLUGINS="$(PLUGINS)" \
+		ARTIFACT_DIR="$(CURDIR)/e2e/results-artifacts" \
+		bash scripts/run-smoke.sh
 
 # ── Status ────────────────────────────────────────────────────────────────────
 

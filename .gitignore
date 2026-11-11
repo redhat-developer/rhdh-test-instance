@@ -7,5 +7,6 @@ plugin-infra.sh
 # Playwright smoke suite
 e2e/node_modules/
 e2e/results/
+e2e/results-artifacts/
 e2e/playwright-report/
 e2e/test-results/

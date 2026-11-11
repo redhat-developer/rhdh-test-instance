@@ -188,6 +188,30 @@ if ! oc rollout status "deployment/${deployment_name}" -n "$namespace" --timeout
     exit 1
 fi
 
+# In CI, verify the running instance with the smoke suite. A failure is reported
+# in the PR but does not tear down the instance, so the cluster stays available
+# for debugging.
+if [[ "${OPENSHIFT_CI}" == "true" && "${SKIP_SMOKE:-false}" != "true" ]]; then
+    echo "Running smoke checks against ${RHDH_BASE_URL}..."
+    if RHDH_BASE_URL="$RHDH_BASE_URL" PLUGINS="$PLUGINS_RESOLVED" \
+        ARTIFACT_DIR="${ARTIFACT_DIR:-}" bash scripts/run-smoke.sh; then
+        ci_comment "✅ **Smoke checks passed**
+
+🌐 ${RHDH_BASE_URL}
+
+Plugins: \`${PLUGINS_RESOLVED}\`"
+    else
+        ci_comment "⚠️ **Smoke checks failed**
+
+The deployment is up but the Playwright smoke suite failed. The instance stays
+available for debugging; see the job artifacts for traces and screenshots.
+
+🌐 ${RHDH_BASE_URL}
+
+Plugins: \`${PLUGINS_RESOLVED}\`"
+    fi
+fi
+
 echo "
 RHDH_BASE_URL :
 ${RHDH_BASE_URL}
