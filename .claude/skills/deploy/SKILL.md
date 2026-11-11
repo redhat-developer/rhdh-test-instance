@@ -131,8 +131,9 @@ validates the Operator CR. GitHub Actions runs it for `2.2` and `next` on
 configuration PRs, weekly, and on demand.
 
 `make smoke` verifies a live instance with Playwright: Keycloak sign-in,
-`loaded-plugins`, home page defaults, sidebar search, the language selector and
-the selected plugins' routes.
+`loaded-plugins`, home page defaults, the global search box, the language selector
+and the selected plugins' routes. Every `/test deploy` runs it automatically and
+reports the result in the PR; a failure keeps the instance up for debugging.
 
 Always run it before proposing a configuration change. Do not report a
 deployment as verified without it.

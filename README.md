@@ -133,8 +133,12 @@ Base deployments follow the product defaults: no hidden widgets, no copied
 quickstart steps, no catalog overrides. Backstage replaces arrays when config
 files are merged, so `config/app-config-rhdh.yaml` restates the product's
 `app.extensions` defaults (landing page, search widget, TechDocs add-ons) before
-adding the language list. `make verify-plugins` fails if a product default goes
-missing. When a default is wrong, file a bug rather than override it.
+adding the language list. The one intentional deviation is the homepage layout,
+which mirrors RHDH core CI: `page:home` is disabled because the homepage plugin
+registers `page:homepage` at `/`, and leaving both enabled shows two Home
+destinations and an empty homepage. `make verify-plugins` fails if a product
+default goes missing; report other wrong defaults as bugs rather than overriding
+them locally.
 
 ## Verification
 
@@ -163,21 +167,27 @@ bash scripts/verify-plugins.sh --version 2.2 --plugins all --native
 ```
 
 The container run remains the authoritative check; GitHub Actions runs it for
-`2.2` and `next` on every PR that touches configuration, weekly, and on demand
+the base configuration and for `all` plugins on `2.2`, and for `all` plugins on
+`next`, on every PR that touches configuration, weekly, and on demand
 (`.github/workflows/verify-plugins.yaml`).
 
 ### Smoke checks on a live instance
 
 `make smoke` drives the deployed instance with Playwright: sign-in through
-Keycloak, `loaded-plugins` API expectations, the home page defaults, the sidebar
-search entry, the language selector, and the routes of the selected plugins.
+Keycloak, `loaded-plugins` API expectations, the home page defaults, the global
+search box, the language selector, and the routes of the selected plugins.
 
 ```bash
 make smoke NAMESPACE=rhdh EXPECT_PLUGINS=kubernetes,rbac ABSENT_PLUGINS=intelligent-assistant
 ```
 
-`EXPECT_PLUGINS` defaults to the resolved `PLUGINS` list. The first run needs
+`EXPECT_PLUGINS` defaults to the resolved `PLUGINS` list and `ABSENT_PLUGINS` to
+every plugin that was not selected. The first run needs
 `npx playwright install chromium`. Failures keep a trace in `e2e/results/`.
+
+Every `/test deploy` runs the same suite after the rollout and reports the
+result as a PR comment. A smoke failure does not tear down the instance, so it
+stays available for debugging.
 
 ## Sign-in and credentials
 
@@ -190,7 +200,8 @@ Every instance uses OIDC through the shared Keycloak:
 
 `GITHUB_TOKEN` is optional and only used when supplied. Without it, catalog
 locations and Scorecard use public GitHub access and bulk import cannot open
-pull requests.
+pull requests. For Test Day, supply a token: many instances share one cluster IP
+and exhaust GitHub's unauthenticated rate limit quickly.
 
 ## Repository layout
 

@@ -122,6 +122,10 @@ make status logs url
 make smoke NAMESPACE=rhdh              # Playwright checks against a live instance
 ```
 
+`/test deploy` runs `make smoke` automatically after the rollout and reports the
+result in the PR; a failure does not tear down the instance. Only RHDH 2.2 and
+`next` are supported (`SUPPORTED_RELEASE_LINES`); 2.1 is out of scope.
+
 ## Intelligent Assistant specifics
 
 - OKP is not supported: the no-OKP stack (`lightspeed-stack-no-okp.yaml`) is
