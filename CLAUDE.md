@@ -26,7 +26,7 @@ supported release lines live in `SUPPORTED_RELEASE_LINES` in
 ```
 deploy.sh
 ├── parses <helm|operator> <version> [--namespace] [--plugins]
-├── sources .env (local) or uses CI-injected Vault secrets (OPENSHIFT_CI=true)
+├── sources .env (local) or uses CI-injected Bitwarden secrets (OPENSHIFT_CI=true)
 ├── resolves plugins, builds the merged configuration:
 │   ├── app-config-rhdh.yaml   base config + selected plugins' app-config.yaml
 │   └── dynamic-plugins.yaml   bundled defaults + selected plugins' entries
@@ -88,10 +88,14 @@ and the Operator flavours; do not duplicate them in `dynamic-plugins.yaml`.
   `build_dynamic_plugins`.
 - **Both install methods must work.** Component plugins come from the chart or
   the Operator flavour so Helm and Operator stay aligned.
-- **`SEGMENT_TEST_MODE=true`** is set for both methods.
+- **`SEGMENT_TEST_MODE=true`** is set for both methods as a fallback; the Segment
+  analytics provider (`backstage-community-plugin-analytics-provider-segment`) is
+  disabled in `config/dynamic-plugins.yaml` so test instances send no telemetry.
+  Adoption Insights is a separate analytics module and stays enabled.
 - **Secrets are generated at deploy time** (`SESSION_SECRET`, `BACKEND_SECRET`,
-  `MCP_TOKEN`). Only `GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM credentials are
-  copied from the environment, and only when provided.
+  `MCP_TOKEN`). Only `RHDH_GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM credentials
+  are copied from the environment, and only when provided. The GitHub token has
+  its own name so an unrelated `GITHUB_TOKEN` is never copied into the cluster.
 - Keycloak uses a **plain HTTP route**: cluster-pool ingress certificates are
   self-signed.
 - Do not add release-specific workarounds (specific RC builds, catalog digests,
@@ -122,9 +126,12 @@ make status logs url
 make smoke NAMESPACE=rhdh              # Playwright checks against a live instance
 ```
 
-`/test deploy` runs `make smoke` automatically after the rollout and reports the
-result in the PR; a failure does not tear down the instance. Only RHDH 2.2 and
-`next` are supported (`SUPPORTED_RELEASE_LINES`); 2.1 is out of scope.
+`/test deploy` runs the same smoke suite (`scripts/run-smoke.sh`) automatically
+after the rollout and reports the result in the PR; a failure does not tear down
+the instance. `make uninstall-operator` refuses while Backstage instances exist
+unless `FORCE=true`, because the OLM v1 ClusterExtension takes the CRDs with it.
+Only RHDH 2.2 and `next` are supported (`SUPPORTED_RELEASE_LINES`); 2.1 is out
+of scope.
 
 ## Intelligent Assistant specifics
 

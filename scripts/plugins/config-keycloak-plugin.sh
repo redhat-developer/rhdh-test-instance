@@ -16,7 +16,8 @@
 #   2. create_users_and_groups_keycloak     realm, groups, users (idempotent)
 #   3. register_keycloak_client             per-namespace OIDC client
 #   4. config_secrets_for_keycloak_plugins  KEYCLOAK_* into rhdh-secrets
-#   5. apply_keycloak_labels                labels for the Kubernetes plugin
+#   5. apply_keycloak_egress_policy         allow HTTP egress to the Keycloak route
+#   6. apply_keycloak_labels                labels for the Kubernetes plugin
 # =============================================================================
 
 KEYCLOAK_NS="${KEYCLOAK_NS:-rhdh-keycloak}"

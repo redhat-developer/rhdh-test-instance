@@ -1,7 +1,7 @@
 ---
 name: deploy
 description: This skill should be used when the user asks to "deploy a test instance", "create a test deployment", "deploy RHDH", "spin up a test instance", "deploy with helm", "deploy with operator", "set up a test environment", "create a PR deployment", "use /test deploy", "enable a plugin", "disable a plugin", "add a plugin", "configure a plugin", "list available plugins", "show plugins", "install plugin", "remove plugin", "configure dynamic plugins", "add dynamic plugin", "verify plugin configuration", or mentions deploying an RHDH instance or enabling, disabling, or configuring dynamic plugins.
-allowed-tools: Bash(gh *), Bash(git *), Bash(oc *), Bash(kubectl *), Bash(*vault*), Bash(curl *), Bash(ls *), Bash(make *), Bash(bash *), Read, Edit, Write, WebFetch
+allowed-tools: Bash(gh *), Bash(git *), Bash(oc *), Bash(kubectl *), Bash(bw *), Bash(curl *), Bash(ls *), Bash(make *), Bash(bash *), Read, Edit, Write, WebFetch
 ---
 
 # Deploy & Configure RHDH Test Instance
@@ -127,13 +127,16 @@ OIDC client.
 the same `install-dynamic-plugins` installer as the init container. It fails on
 unresolvable `ref://` entries, conflicting configuration, pull failures,
 `bs_` tag drift and `app.extensions` defaults that are not restated, and
-validates the Operator CR. GitHub Actions runs it for `2.2` and `next` on
-configuration PRs, weekly, and on demand.
+validates the Operator CR. GitHub Actions runs it for the base configuration and
+`all` plugins on `2.2`, and for `all` on `next`, on configuration PRs, weekly,
+and on demand.
 
 `make smoke` verifies a live instance with Playwright: Keycloak sign-in,
 `loaded-plugins`, home page defaults, the global search box, the language selector
-and the selected plugins' routes. Every `/test deploy` runs it automatically and
-reports the result in the PR; a failure keeps the instance up for debugging.
+and the selected plugins' routes. It also asserts that the Segment analytics
+provider never loads. Every `/test deploy` runs the same suite
+(`scripts/run-smoke.sh`) automatically and reports the result in the PR; a
+failure keeps the instance up for debugging.
 
 Always run it before proposing a configuration change. Do not report a
 deployment as verified without it.
@@ -153,8 +156,9 @@ If the rollout fails, `deploy.sh` prints the installer logs automatically.
 
 ## Secrets
 
-Never print secret values. CI reads them from Vault
-(`selfservice/rhdh-test-instance/`); local deployments read `.env`.
+Never print secret values. CI reads them from the Prow secret bundle, which is
+maintained in Bitwarden (collection `Rhdh Test Instance Ci Secrets`); local
+deployments read `.env`.
 `SESSION_SECRET`, `BACKEND_SECRET` and `MCP_TOKEN` are generated at deploy time.
-`GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM credentials are optional and only
-used when provided.
+`RHDH_GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM credentials are optional and
+only used when provided.

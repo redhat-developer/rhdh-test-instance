@@ -7,10 +7,14 @@ instances on a single cluster, each in its own namespace, sharing one Keycloak.
 ## Features
 
 - **Helm and Operator** installation methods
-- **RHDH 2.2 and `next`** — `2.2`, a patch release (`2.2.3`), a CI build
-  (`2.2-120-CI`), or `next` for the newest CI stream
+- **RHDH 2.2 and `next`** — `2.2` (newest tag on the line), a patch release
+  (`2.2.3`) or a CI build (`2.2-120-CI`) used as given, or `next` for the newest
+  CI stream. An exact chart tag that does not exist fails before anything is
+  created on the cluster.
 - **Shared Keycloak** — one Keycloak per cluster, one OIDC client per namespace,
   test users `test1` (admin) and `test2` (developer)
+- **No telemetry** — the Segment analytics provider is disabled; Adoption
+  Insights stays enabled
 - **Optional plugins** — `kubernetes`, `bulk-import`,
   `intelligent-assistant`, `orchestrator`, `scorecard`, `rbac`, `lighthouse`
 - **Configuration verification** — renders the deployment and runs the real
@@ -32,8 +36,11 @@ Examples:
 /test deploy helm 2.2 4h --plugins kubernetes,rbac
 ```
 
-The bot replies with the RHDH URL, the OpenShift console link, and cluster
-credentials. Deployments run for the requested duration (default 3h, maximum 4h).
+The bot replies with the RHDH URL, the OpenShift console link, the parsed
+command, and cluster credentials. Deployments run for the requested duration
+(default 3h, maximum 4h). The parser reads the newest comment that starts with
+`/test deploy` or `/test redeploy`, ignoring leading blank lines, and takes the
+command from its first non-empty line.
 
 Prow job status:
 <https://prow.ci.openshift.org/?repo=redhat-developer%2Frhdh-test-instance&type=presubmit&job=pull-ci-redhat-developer-rhdh-test-instance-main-deploy>
@@ -72,7 +79,8 @@ make url
 
 make undeploy-helm                       # keep shared Keycloak and the Operator
 make undeploy-keycloak                   # only when no instances remain
-make uninstall-operator
+make uninstall-operator                  # refuses while Backstage instances exist
+make uninstall-operator FORCE=true       # also removes the CRDs and all instances
 make clean                               # namespace + cluster-scoped leftovers
 ```
 
@@ -95,7 +103,7 @@ its cluster-scoped leftovers, and leaves the other instances signed in.
 | Variable            | Default                                       | Description                                                    |
 | ------------------- | --------------------------------------------- | -------------------------------------------------------------- |
 | `NAMESPACE`         | `rhdh`                                        | Target namespace                                               |
-| `VERSION`           | `2.2`                                         | `2.2`, `2.2.x`, `2.2-<build>-CI`, or `next`                    |
+| `VERSION`           | `2.2`                                         | `2.2`, `2.2.3`, `2.2-<build>-CI`, or `next`                    |
 | `PLUGINS`           | _(empty)_                                     | Comma-separated plugins, `all`, or `all,-name`                 |
 | `USE_CONTAINER`     | `false`                                       | Run the deployment inside the e2e-runner container             |
 | `CATALOG_INDEX_IMAGE` | bundled with the chart/Operator             | Full plugin catalog image (registry/repository:tag or digest)  |
@@ -104,6 +112,8 @@ its cluster-scoped leftovers, and leaves the other instances signed in.
 | `KEYCLOAK_NS`       | `rhdh-keycloak`                               | Namespace of the shared Keycloak                               |
 | `OPERATOR_NAMESPACE`| `rhdh-operator`                        | Namespace of the RHDH Operator                                 |
 | `RUNNER_IMAGE`      | `quay.io/rhdh-community/rhdh-e2e-runner:main` | Container image for `install-operator`                         |
+| `RHDH_GITHUB_TOKEN` | _(empty)_                                     | Opt-in GitHub token; public access is the default              |
+| `FORCE`             | `false`                                       | Allow `uninstall-operator` while instances still exist         |
 
 ## Plugins
 
@@ -113,7 +123,7 @@ everything; `-name` excludes a plugin (`all,-orchestrator`).
 | Plugin | What it adds |
 | --- | --- |
 | `kubernetes` | Kubernetes and Topology plugins, the service account read access they need, and a `topology-test` entity |
-| `bulk-import` | Bulk import of existing repositories (needs `GITHUB_TOKEN`) |
+| `bulk-import` | Bulk import of existing repositories (needs `RHDH_GITHUB_TOKEN`) |
 | `intelligent-assistant` | Intelligent Assistant with the MCP actions backend, optional LLM provider, and MCP client access |
 | `orchestrator` | Orchestrator plugins plus the Serverless/Logic infrastructure |
 | `scorecard` | Scorecard metrics (GitHub, OpenSSF, Dependabot, SonarQube, filecheck) |
@@ -198,10 +208,11 @@ Every instance uses OIDC through the shared Keycloak:
 | `test1` | `test1@123` | developers, admins, viewers | RBAC admin |
 | `test2` | `test2@123` | developers | RBAC developer |
 
-`GITHUB_TOKEN` is optional and only used when supplied. Without it, catalog
-locations and Scorecard use public GitHub access and bulk import cannot open
-pull requests. For Test Day, supply a token: many instances share one cluster IP
-and exhaust GitHub's unauthenticated rate limit quickly.
+`RHDH_GITHUB_TOKEN` is optional and only used when supplied. Without it,
+catalog locations and Scorecard use public GitHub access and bulk import cannot
+open pull requests. GitHub allows unauthenticated requests at 60 per hour per
+IP, so many instances behind one cluster IP reach that limit during a catalog
+refresh; that does not fail the catalog, it only delays entries.
 
 ## Repository layout
 
@@ -253,14 +264,18 @@ the plugin list.
 
 ## Secrets
 
-PR deployments get secrets from Vault
-(`selfservice/rhdh-test-instance/`); the deployment writes them into
-`rhdh-secrets` in the instance namespace. Local deployments read `.env`.
+PR deployments get secrets from the Prow secret bundle (`rhdh-test-instance`),
+which is maintained in Bitwarden: the collection **`Rhdh Test Instance Ci
+Secrets`**, items `ocp-cluster-creds/CLUSTER_ADMIN_USERNAME` and
+`ocp-cluster-creds/CLUSTER_ADMIN_PASSWORD` hold the cluster admin credentials.
+The deployment writes the application secrets into `rhdh-secrets` in the
+instance namespace. Local deployments read `.env`.
 
 - `SESSION_SECRET`, `BACKEND_SECRET`, `MCP_TOKEN` are generated when missing.
 - `KEYCLOAK_*` are written by the Keycloak setup.
-- `GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM provider credentials are only set
-  when provided.
+- `RHDH_GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM provider credentials are only
+  set when provided. The GitHub token is opt-in under its own name so a
+  `GITHUB_TOKEN` exported for other tools is never copied into the cluster.
 
 ## Troubleshooting
 
