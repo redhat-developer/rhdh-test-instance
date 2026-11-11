@@ -264,12 +264,13 @@ the plugin list.
 
 ## Secrets
 
-PR deployments get secrets from the Prow secret bundle (`rhdh-test-instance`),
-which is maintained in Bitwarden: the collection **`Rhdh Test Instance Ci
+PR deployments get secrets from the Prow secret bundle, which is synced from
+Google Secret Manager (GSM) with the `e2e-secrets` CLI tool. People read the
+cluster admin credentials in Bitwarden, collection **`Rhdh Test Instance Ci
 Secrets`**, items `ocp-cluster-creds/CLUSTER_ADMIN_USERNAME` and
-`ocp-cluster-creds/CLUSTER_ADMIN_PASSWORD` hold the cluster admin credentials.
-The deployment writes the application secrets into `rhdh-secrets` in the
-instance namespace. Local deployments read `.env`.
+`ocp-cluster-creds/CLUSTER_ADMIN_PASSWORD`; Bitwarden and GSM are kept in sync
+by the same tool. The deployment writes the application secrets into
+`rhdh-secrets` in the instance namespace. Local deployments read `.env`.
 
 - `SESSION_SECRET`, `BACKEND_SECRET`, `MCP_TOKEN` are generated when missing.
 - `KEYCLOAK_*` are written by the Keycloak setup.

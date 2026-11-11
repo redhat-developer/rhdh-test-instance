@@ -26,7 +26,7 @@ supported release lines live in `SUPPORTED_RELEASE_LINES` in
 ```
 deploy.sh
 ├── parses <helm|operator> <version> [--namespace] [--plugins]
-├── sources .env (local) or uses CI-injected Bitwarden secrets (OPENSHIFT_CI=true)
+├── sources .env (local) or uses CI-injected GSM secrets (OPENSHIFT_CI=true)
 ├── resolves plugins, builds the merged configuration:
 │   ├── app-config-rhdh.yaml   base config + selected plugins' app-config.yaml
 │   └── dynamic-plugins.yaml   bundled defaults + selected plugins' entries

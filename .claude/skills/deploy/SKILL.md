@@ -156,9 +156,10 @@ If the rollout fails, `deploy.sh` prints the installer logs automatically.
 
 ## Secrets
 
-Never print secret values. CI reads them from the Prow secret bundle, which is
-maintained in Bitwarden (collection `Rhdh Test Instance Ci Secrets`); local
-deployments read `.env`.
+Never print secret values. CI reads them from the Prow secret bundle, synced
+from Google Secret Manager (GSM) with the `e2e-secrets` CLI tool. Look them up
+in Bitwarden (collection `Rhdh Test Instance Ci Secrets`); local deployments
+read `.env`.
 `SESSION_SECRET`, `BACKEND_SECRET` and `MCP_TOKEN` are generated at deploy time.
 `RHDH_GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM credentials are optional and
 only used when provided.

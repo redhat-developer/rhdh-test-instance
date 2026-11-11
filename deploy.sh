@@ -81,7 +81,7 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/scripts/deployment-common.sh"
 
 # Local deployments read secrets and optional settings from .env. CI injects
-# them from Bitwarden (OPENSHIFT_CI=true).
+# them from GSM (OPENSHIFT_CI=true).
 if [[ "${OPENSHIFT_CI}" != "true" && -f .env ]]; then
     source .env
 fi
