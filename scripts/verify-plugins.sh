@@ -157,11 +157,10 @@ curl -fsSL "https://raw.githubusercontent.com/redhat-developer/rhdh/${bs_branch}
 yq -o=json '.app.extensions // []' "$product_branch_config" \
     | jq -r '.[] | if type == "object" then keys[0] else . end' >> "$required_extensions"
 
-installer_app_config="${install_dir}/app-config.dynamic-plugins.yaml"
-if [[ -f "$installer_app_config" ]]; then
-    yq -o=json '.app.extensions // []' "$installer_app_config" \
-        | jq -r '.[] | if type == "object" then keys[0] else . end' >> "$required_extensions"
-fi
+installer_app_config="${install_dir}/dynamic-plugins-root/app-config.dynamic-plugins.yaml"
+[[ -f "$installer_app_config" ]] || die "The plugin installer did not produce app-config.dynamic-plugins.yaml."
+yq -o=json '.app.extensions // []' "$installer_app_config" \
+    | jq -r '.[] | if type == "object" then keys[0] else . end' >> "$required_extensions"
 
 # Compare extension types (keys), not values: the test instance overrides some
 # values on purpose (for example page:home: false).
