@@ -25,7 +25,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ['2.2', 'next']
+        # Base configuration (no optional plugins) plus every plugin, on the
+        # current release line and next.
+        include:
+          - version: '2.2'
+            plugins: ''
+          - version: '2.2'
+            plugins: 'all'
+          - version: 'next'
+            plugins: 'all'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,5 +52,5 @@ jobs:
             -o /usr/local/bin/yq
           sudo chmod +x /usr/local/bin/yq
 
-      - name: Verify plugins (${{ matrix.version }})
-        run: make verify-plugins VERSION=${{ matrix.version }} PLUGINS=all
+      - name: "Verify plugins (${{ matrix.version }}, ${{ matrix.plugins || 'base' }})"
+        run: make verify-plugins VERSION=${{ matrix.version }} PLUGINS=${{ matrix.plugins }}
