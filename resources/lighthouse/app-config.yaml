@@ -1,12 +1,10 @@
 # Lighthouse reports are HTML with inline <script> blocks, served through the
 # RHDH proxy (same origin), so the backend CSP must allow inline scripts.
-# Kept in app-config rather than the plugin configuration: the analytics plugin
-# also defines script-src, and differing values across plugins are rejected by
-# the installer.
+# Kept in app-config rather than the plugin configuration: the installer rejects
+# differing script-src values when several plugins define it.
 backend:
   csp:
     script-src:
       - "'self'"
       - "'unsafe-eval'"
       - "'unsafe-inline'"
-      - https://cdn.segment.com

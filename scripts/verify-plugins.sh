@@ -25,13 +25,14 @@ set -euo pipefail
 version="2.2"
 plugins="${PLUGINS:-}"
 chart_version=""
+chart_override=""
 native=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version) version="$2"; shift 2 ;;
         --plugins) plugins="$2"; shift 2 ;;
-        --chart)   chart_version="$2"; shift 2 ;;
+        --chart)   chart_override="$2"; shift 2 ;;
         --native)  native=true; shift ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -59,8 +60,14 @@ else
     die "podman or docker is required to run the plugin installer (or use --native)."
 fi
 
-chart_version="${chart_version:-$(resolve_helm_chart_version "$version")}"
+chart_version="${chart_override:-$(resolve_helm_chart_version "$version")}"
 [[ -n "$chart_version" ]] || die "Could not resolve a Helm chart version for '${version}'."
+if [[ -n "${chart_override}" ]]; then
+    helm show chart oci://quay.io/rhdh/chart --version "$chart_version" >/dev/null 2>&1 || \
+        die "Helm chart '${chart_version}' is not published. See https://quay.io/repository/rhdh/chart?tab=tags"
+else
+    validate_helm_chart_version "$version" "$chart_version"
+fi
 
 echo "Verifying RHDH ${version} (chart ${chart_version}) with plugins: ${PLUGINS_RESOLVED}"
 

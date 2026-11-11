@@ -23,6 +23,9 @@ auth:
       key: BACKEND_SECRET
 
 extraEnv:
+  # Fallback only: the Segment analytics provider is disabled in
+  # config/dynamic-plugins.yaml, but the plugin reads this as
+  # app.analytics.segment.testMode if it is ever re-enabled.
   - name: SEGMENT_TEST_MODE
     value: 'true'
   # Cluster-pool ingress certificates are self-signed.

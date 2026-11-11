@@ -50,7 +50,7 @@ parse_rhdh_version() {
         export RHDH_RELEASE_LINE=""
         return 0
     fi
-    if [[ ! "$version" =~ ^([0-9]+\.[0-9]+)(\.[0-9]+)?(-[0-9]+-CI)?$ ]]; then
+    if [[ ! "$version" =~ ^([0-9]+\.[0-9]+)(\.[0-9]+|-[0-9]+-CI)?$ ]]; then
         echo "Error: Unsupported RHDH version '${version}'. Use '${SUPPORTED_RELEASE_LINES}', a patch release, a '<line>-<build>-CI' build, or 'next'." >&2
         return 1
     fi
@@ -214,6 +214,22 @@ resolve_helm_chart_version() {
     quay_latest_tag "rhdh/chart" "$line"
 }
 
+# is_exact_version <version> — true for tags that are not resolved from a stream.
+is_exact_version() {
+    [[ "$1" =~ ^[0-9]+\.[0-9]+(\.[0-9]+|-[0-9]+-CI)$ ]]
+}
+
+# validate_helm_chart_version <version> <chart-version>
+# Exact versions must be published; stream versions were already resolved to an
+# existing tag by quay_latest_tag.
+validate_helm_chart_version() {
+    local version="$1" chart_version="$2"
+    is_exact_version "$version" || return 0
+    helm show chart oci://quay.io/rhdh/chart --version "${chart_version}" >/dev/null 2>&1 && return 0
+    echo "Error: Helm chart '${chart_version}' is not published. Check https://quay.io/repository/rhdh/chart?tab=tags" >&2
+    return 1
+}
+
 # fetch_chart <version> <destination> — pull and untar the chart so files
 # bundled with the selected release can be reused (Intelligent Assistant stack).
 fetch_chart() {
@@ -364,11 +380,13 @@ build_app_config() {
 
     yq eval-all '. as $item ireduce ({}; . * $item)' "${args[@]}" > "$output"
 
-    # A GitHub token is optional. Reference it without inlining the value: the
-    # Secret is already injected into the pod as GITHUB_TOKEN, and writing the
-    # token here would expose it in a ConfigMap. An existing block is replaced
-    # because Backstage replaces arrays when config files are merged.
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    # A GitHub token is optional and opt-in through RHDH_GITHUB_TOKEN, so an
+    # unrelated GITHUB_TOKEN exported for other tools is never copied into the
+    # cluster. Reference it without inlining the value: the Secret is already
+    # injected into the pod as GITHUB_TOKEN, and writing the token here would
+    # expose it in a ConfigMap. An existing block is replaced because Backstage
+    # replaces arrays when config files are merged.
+    if [[ -n "${RHDH_GITHUB_TOKEN:-}" ]]; then
         yq -i '.integrations.github = [{"host": "github.com", "token": "${GITHUB_TOKEN}"}]' "$output"
     fi
 }

@@ -68,12 +68,14 @@ create_rhdh_secrets() {
     echo "rhdh-secrets created!"
   fi
 
-  # Optional GitHub token: enables private catalog locations, bulk import and
-  # write operations. Public access remains the default.
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    jq -n --arg token "$GITHUB_TOKEN" '{stringData: {GITHUB_TOKEN: $token}}' \
+  # Optional GitHub token, opt-in through RHDH_GITHUB_TOKEN so a GITHUB_TOKEN
+  # exported for other tools is never copied into the cluster. It enables
+  # private catalog locations, bulk import and write operations; public access
+  # remains the default.
+  if [[ -n "${RHDH_GITHUB_TOKEN:-}" ]]; then
+    jq -n --arg token "$RHDH_GITHUB_TOKEN" '{stringData: {GITHUB_TOKEN: $token}}' \
       | oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge --patch-file=/dev/stdin
-    echo "GITHUB_TOKEN configured."
+    echo "GitHub token configured from RHDH_GITHUB_TOKEN."
   fi
 }
 

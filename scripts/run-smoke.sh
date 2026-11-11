@@ -41,6 +41,12 @@ eval "$resolution"
 EXPECT_PLUGINS="${EXPECT_PLUGINS:-${RESOLVED_EXPECTED}}"
 ABSENT_PLUGINS="${ABSENT_PLUGINS:-${RESOLVED_ABSENT}}"
 
+# The Segment analytics provider is disabled in config/dynamic-plugins.yaml.
+# It must never load, whatever the plugin selection.
+if [[ "${ABSENT_PLUGINS}" != *analytics-provider-segment* ]]; then
+    ABSENT_PLUGINS="${ABSENT_PLUGINS:+${ABSENT_PLUGINS},}analytics-provider-segment"
+fi
+
 echo "RHDH URL:       ${RHDH_BASE_URL}"
 echo "Expected:       ${EXPECT_PLUGINS:-none}"
 echo "Must be absent: ${ABSENT_PLUGINS:-none}"

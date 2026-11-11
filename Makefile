@@ -6,6 +6,7 @@ CATALOG_INDEX_TAG ?=
 CATALOG_INDEX_IMAGE ?=
 RHDH_IMAGE ?=
 RUNNER_IMAGE ?= quay.io/rhdh-community/rhdh-e2e-runner:main
+FORCE ?= false
 KEYCLOAK_NS ?= rhdh-keycloak
 OPERATOR_NAMESPACE ?= rhdh-operator
 
@@ -79,16 +80,23 @@ deploy-keycloak: ## Pre-create the shared Keycloak, realm and test users (run on
 undeploy-infra: ## Uninstall orchestrator infra chart
 	helm uninstall orchestrator-infra -n $(NAMESPACE) || true
 
-uninstall-operator: ## Uninstall the RHDH operator, its OLM v1 resources and the operator namespace
+uninstall-operator: ## Uninstall the RHDH operator, its OLM v1 resources and the operator namespace (FORCE=true despite running instances)
+	@if [ -n "$$(oc get backstages.rhdh.redhat.com --all-namespaces -o name 2>/dev/null)" ] && [ "$(FORCE)" != "true" ]; then \
+		echo "Error: Backstage instances still exist. Deleting the operator also removes the" >&2; \
+		echo "RHDH CRDs and every instance built from them:" >&2; \
+		oc get backstages.rhdh.redhat.com --all-namespaces >&2; \
+		echo "Remove them with 'make clean NAMESPACE=<ns>' or re-run with FORCE=true." >&2; \
+		exit 1; \
+	fi
 	@if oc api-resources --api-group=olm.operatorframework.io 2>/dev/null | grep -q "^clusterextensions "; then \
 		oc delete clusterextension.olm.operatorframework.io rhdh --ignore-not-found; \
-		for catalog in rhdh-fast-$(shell grep -oE '^[0-9]+\.[0-9]+' <<< "$(VERSION)") rhdh rhdh-default; do \
-			oc delete clustercatalog.olm.operatorframework.io "$$catalog" --ignore-not-found; \
+		for catalog in $$(oc get clustercatalog.olm.operatorframework.io -o name 2>/dev/null | grep '/rhdh-'); do \
+			oc delete "$$catalog" --ignore-not-found; \
 		done; \
 	fi
 	oc delete clusterrolebinding rhdh-installer-binding --ignore-not-found
 	oc delete project $(OPERATOR_NAMESPACE) --ignore-not-found
-	@echo "Operator uninstalled. RHDH CRDs may linger until all Backstage CRs are removed."
+	@echo "Operator uninstalled. The OLM v1 ClusterExtension took the RHDH CRDs and any remaining Backstage instances with it."
 
 clean: ## Delete the namespace and the instance's cluster-scoped resources (keeps Keycloak and the operator)
 	@TEARDOWN=true NAMESPACE=$(NAMESPACE) KEYCLOAK_NS=$(KEYCLOAK_NS) TIMEOUT=0 \
@@ -153,7 +161,7 @@ endif
 		-e K8S_CLUSTER_URL -e K8S_CLUSTER_TOKEN \
 		-e CATALOG_INDEX_IMAGE -e CATALOG_INDEX_TAG -e RHDH_IMAGE \
 		-e KEYCLOAK_NS -e OPERATOR_NAMESPACE \
-		-e GITHUB_TOKEN -e SONARQUBE_API_KEY \
+		-e RHDH_GITHUB_TOKEN -e SONARQUBE_API_KEY \
 		-e ENABLE_OPENAI -e OPENAI_API_KEY \
 		-e ENABLE_VLLM -e VLLM_URL -e VLLM_API_KEY \
 		-e ENABLE_OLLAMA -e OLLAMA_URL \

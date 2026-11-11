@@ -81,7 +81,7 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/scripts/deployment-common.sh"
 
 # Local deployments read secrets and optional settings from .env. CI injects
-# them from Vault (OPENSHIFT_CI=true).
+# them from Bitwarden (OPENSHIFT_CI=true).
 if [[ "${OPENSHIFT_CI}" != "true" && -f .env ]]; then
     source .env
 fi
@@ -103,6 +103,18 @@ for tool in oc jq yq; do
 done
 if [[ "$installation_method" == "helm" ]]; then
     command -v helm >/dev/null || die "Required tool 'helm' is not installed."
+    # Resolve and validate the chart before anything is created on the cluster,
+    # so a mistyped exact version fails fast and with a clear message.
+    export RESOLVED_HELM_CHART_VERSION
+    if ! RESOLVED_HELM_CHART_VERSION=$(resolve_helm_chart_version "$version") || \
+        [[ -z "$RESOLVED_HELM_CHART_VERSION" ]]; then
+        ci_comment "❌ **Error: No Helm chart for RHDH \`${version}\`** 🚫"
+        die "No Helm chart is published for '${version}'. Check https://quay.io/repository/rhdh/chart?tab=tags"
+    fi
+    if ! validate_helm_chart_version "$version" "$RESOLVED_HELM_CHART_VERSION"; then
+        ci_comment "❌ **Error: Helm chart \`${RESOLVED_HELM_CHART_VERSION}\` does not exist** 🚫"
+        exit 1
+    fi
 fi
 
 # Resolve CATALOG_INDEX_TAG into CATALOG_INDEX_IMAGE (and strip any oci://).
