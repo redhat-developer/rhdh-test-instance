@@ -87,7 +87,9 @@ main() {
   echo "=============================================="
 
   if [[ "${TEARDOWN:-false}" == "true" ]]; then
-    resolve_plugins "$spec" --no-always-on
+    # Only explicitly named plugins are torn down; "all" leaves the shared
+    # Keycloak and other always-on infrastructure alone.
+    resolve_plugins "$spec" --explicit-only
   else
     resolve_plugins "$spec"
   fi

@@ -31,7 +31,7 @@ data:
       description: Red Hat Single Sign-On Operator deployment of Keycloak
       annotations:
         backstage.io/kubernetes-id: keycloak
-        backstage.io/kubernetes-namespace: rhdh
+        backstage.io/kubernetes-namespace: ${KEYCLOAK_NS}
       links:
         - url: https://www.keycloak.org/documentation
           title: Documentation
@@ -263,7 +263,7 @@ data:
       description: Self-hosted lighthouse-audit-service providing web performance and accessibility audit history for RHDH
       annotations:
         backstage.io/kubernetes-id: lighthouse-instance
-        backstage.io/kubernetes-namespace: rhdh
+        backstage.io/kubernetes-namespace: ${NAMESPACE}
       links:
         - url: https://github.com/backstage/lighthouse-audit-service
           title: Documentation

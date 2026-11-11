@@ -582,38 +582,7 @@ uninstall_keycloak_infra() {
 }
 
 # =============================================================================
-# Main (standalone execution)
+# These functions are sourced by scripts/config-plugins.sh. There is no
+# standalone entry point: the setup needs the version, namespace and catalog
+# resolved by deploy.sh (see `make deploy-keycloak`).
 # =============================================================================
-main() {
-  if [[ ! -f "${PWD}/.env" ]]; then
-    echo "Error: .env file not found. Copy .env.example to .env and fill in your values."
-    exit 1
-  fi
-  source "${PWD}/.env"
-
-  echo "=============================================="
-  echo "Configuring Keycloak"
-  echo "  Shared Keycloak NS:  ${KEYCLOAK_NS}"
-  echo "  RHDH instance NS:   ${NAMESPACE}"
-  echo "=============================================="
-
-  deploy_keycloak
-  create_users_and_groups_keycloak
-  register_keycloak_client
-  config_secrets_for_keycloak_plugins
-  apply_keycloak_labels
-
-  echo ""
-  echo "=============================================="
-  echo "Keycloak URL:   ${KEYCLOAK_URL}"
-  echo "Admin:          admin"
-  echo "Realm:          rhdh"
-  echo "Client ID:      rhdh-client-${NAMESPACE}"
-  echo "User pass:      <username>@123"
-  echo "Keycloak configuration complete!"
-  echo "=============================================="
-}
-
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  main
-fi

@@ -21,17 +21,25 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/../scripts/deployment-common.sh"
 parse_rhdh_version "$version"
 
-branch=$(upstream_branch_for rhdh-operator)
+# The operator branch tracks the release line, and the upstream installer only
+# publishes per-line streams (quay.io/rhdh/iib:X.Y-<ocp>-<arch>), so an exact
+# patch release or CI build cannot be installed this way.
+if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$version" =~ ^[0-9]+\.[0-9]+-[0-9]+-CI$ ]]; then
+    echo "Warning: '${version}' cannot be pinned through the Operator installer; installing the newest ${RHDH_RELEASE_LINE} build." >&2
+fi
 if [[ "$version" == "next" ]]; then
     version_arg="--next"
 else
     version_arg="-v ${RHDH_RELEASE_LINE}"
 fi
 
+branch=$(upstream_branch_for rhdh-operator)
 echo "Using operator branch: ${branch}, version argument: ${version_arg}"
 
-# Check if the RHDH Operator is already installed (CRD and operator CSV present).
-if oc get crd/backstages.rhdh.redhat.com &>/dev/null && \
+# The upstream OLM v1 installer creates the operator in rhdh-operator (with
+# rhdh-default-config); OLM v0 installs a CSV instead. Check for either so a
+# second run skips, and so the check does not depend on the OLM generation.
+if oc get configmap rhdh-default-config -n "${OPERATOR_NAMESPACE:-rhdh-operator}" &>/dev/null || \
     oc get csv --all-namespaces -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | grep -q rhdh-operator; then
     echo "RHDH operator is already installed. Skipping."
     exit 0

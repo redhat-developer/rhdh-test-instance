@@ -175,32 +175,7 @@ uninstall_lighthouse() {
 }
 
 # =============================================================================
-# Main (standalone execution)
+# These functions are sourced by scripts/config-plugins.sh. There is no
+# standalone entry point: the setup needs the namespace and URLs resolved by
+# deploy.sh.
 # =============================================================================
-main() {
-  if [[ ! -f "${PWD}/.env" ]]; then
-    echo "Error: .env file not found. Copy .env.example to .env and fill in your values."
-    exit 1
-  fi
-  source "${PWD}/.env"
-
-  echo "=============================================="
-  echo "Configuring Lighthouse Plugin"
-  echo "=============================================="
-
-  deploy_lighthouse
-  config_secrets_for_lighthouse_plugins
-  apply_lighthouse_labels
-  run_lighthouse_initial_scan
-
-  echo ""
-  echo "=============================================="
-  echo "Lighthouse configuration complete!"
-  echo "=============================================="
-
-  exit "${OVERALL_RESULT:-0}"
-}
-
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  main
-fi

@@ -35,14 +35,15 @@ create_rhdh_secrets() {
 
   if oc get secret rhdh-secrets --namespace="${NAMESPACE}" &>/dev/null; then
     # Keep existing values; only refresh the URL and ensure the secrets that the
-    # configuration references are present.
+    # configuration references are present. An explicitly supplied MCP_TOKEN
+    # overrides the stored one.
     local backend_secret mcp_token
     backend_secret=$(oc get secret rhdh-secrets -n "${NAMESPACE}" -o jsonpath='{.data.BACKEND_SECRET}' 2>/dev/null \
       | (base64 -d 2>/dev/null || true))
     [[ -n "$backend_secret" ]] || backend_secret=$(_random_secret)
     mcp_token=$(oc get secret rhdh-secrets -n "${NAMESPACE}" -o jsonpath='{.data.MCP_TOKEN}' 2>/dev/null \
       | (base64 -d 2>/dev/null || true))
-    [[ -n "$mcp_token" ]] || mcp_token=$(_random_secret)
+    mcp_token="${MCP_TOKEN:-${mcp_token:-$(_random_secret)}}"
 
     jq -n --arg url "$RHDH_BASE_URL" --arg backend "$backend_secret" --arg mcp "$mcp_token" \
       '{stringData: {RHDH_BASE_URL: $url, BACKEND_SECRET: $backend, MCP_TOKEN: $mcp}}' \
@@ -53,7 +54,7 @@ create_rhdh_secrets() {
       --from-literal=RHDH_BASE_URL="${RHDH_BASE_URL}" \
       --from-literal=SESSION_SECRET="$(_random_secret)" \
       --from-literal=BACKEND_SECRET="$(_random_secret)" \
-      --from-literal=MCP_TOKEN="$(_random_secret)" \
+      --from-literal=MCP_TOKEN="${MCP_TOKEN:-$(_random_secret)}" \
       --from-literal=KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-}" \
       --from-literal=KEYCLOAK_METADATA_URL="${KEYCLOAK_METADATA_URL:-}" \
       --from-literal=KEYCLOAK_LOGIN_REALM="${KEYCLOAK_LOGIN_REALM:-}" \
@@ -116,7 +117,7 @@ apply_catalog_entities() {
 
   for yaml_file in "${catalog_dir}"/*.yaml; do
     echo "  Applying: $(basename "$yaml_file")"
-    envsubst '${RHDH_BASE_URL} ${NAMESPACE}' < "${yaml_file}" | oc apply -f - --namespace="${NAMESPACE}"
+    envsubst '${RHDH_BASE_URL} ${NAMESPACE} ${KEYCLOAK_NS}' < "${yaml_file}" | oc apply -f - --namespace="${NAMESPACE}"
   done
 
   echo "Catalog entities applied!"
@@ -230,6 +231,9 @@ setup_resources() {
   echo "=============================================="
   echo "Resource Setup"
   echo "=============================================="
+
+  # Shared Keycloak namespace, used by the catalog entities.
+  export KEYCLOAK_NS="${KEYCLOAK_NS:-rhdh-keycloak}"
 
   create_rhdh_secrets
   apply_rhdh_configmaps

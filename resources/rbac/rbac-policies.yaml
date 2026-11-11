@@ -14,6 +14,10 @@ data:
 
     p, role:default/developer, catalog-entity, read, allow
     p, role:default/developer, scorecard.metric.read, read, allow
+    p, role:default/developer, intelligent-assistant.chat, use, allow
+    p, role:default/developer, intelligent-assistant.notebooks, use, allow
+    p, role:default/developer, intelligent-assistant.mcp.tools, use, allow
+    p, role:default/developer, intelligent-assistant.skills, use, allow
 
     g, user:default/test2, role:default/developer
 

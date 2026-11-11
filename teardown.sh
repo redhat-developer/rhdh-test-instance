@@ -20,7 +20,10 @@ set -e
 
 namespace="rhdh"
 installation_method=""
-PLUGINS=""
+# Plugin infrastructure to tear down. Only set from the command line: PLUGINS
+# from .env (used to deploy an instance) must never trigger infrastructure
+# teardown.
+plugins_arg=""
 CLEAN=false
 
 if [[ $# -lt 1 ]]; then
@@ -38,7 +41,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --plugins)
-            PLUGINS="$2"
+            plugins_arg="$2"
             shift 2
             ;;
         --clean)
@@ -72,11 +75,11 @@ echo "=============================================="
 # Step 1: Tear down explicitly requested plugin infrastructure while the
 #         namespace still exists.
 # ---------------------------------------------------------------------------
-if [[ -n "${PLUGINS}" ]]; then
+if [[ -n "${plugins_arg}" ]]; then
     echo ""
-    echo "Tearing down plugin infrastructure: ${PLUGINS}"
+    echo "Tearing down plugin infrastructure: ${plugins_arg}"
     source scripts/config-plugins.sh
-    TEARDOWN=true main "${PLUGINS}"
+    TEARDOWN=true main "${plugins_arg}"
 fi
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,10 @@ DEPLOY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # stream, so a new line only needs to be added here once it is supported.
 SUPPORTED_RELEASE_LINES="${SUPPORTED_RELEASE_LINES:-2.2}"
 
+# Shared Keycloak namespace. Also used by the catalog entities so the Keycloak
+# entity points at the right namespace.
+export KEYCLOAK_NS="${KEYCLOAK_NS:-rhdh-keycloak}"
+
 die() {
     echo "Error: $*" >&2
     exit 1
@@ -193,10 +197,17 @@ quay_latest_ci_tag() {
 }
 
 # resolve_helm_chart_version <version> — prints the chart tag to install.
+# An explicit patch release (X.Y.Z) or CI build (X.Y-N-CI) is used as given;
+# "X.Y" and "next" resolve to the newest tag on their stream.
 resolve_helm_chart_version() {
     local version="$1" line
     if [[ "$version" == "next" ]]; then
         quay_latest_ci_tag "rhdh/chart"
+        return
+    fi
+    if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$version" =~ ^[0-9]+\.[0-9]+-[0-9]+-CI$ ]]; then
+        # Existence is checked by the caller (helm show chart).
+        echo "$version"
         return
     fi
     line=$(grep -oE '^[0-9]+\.[0-9]+' <<< "$version") || return 1
@@ -229,13 +240,15 @@ fetch_chart() {
 PLUGIN_NAMES=(keycloak kubernetes bulk-import intelligent-assistant orchestrator scorecard rbac lighthouse)
 ALWAYS_ON_PLUGINS=(keycloak)
 
-# resolve_plugins <comma-separated list> [--no-always-on]
+# resolve_plugins <comma-separated list> [--explicit-only]
 # Supports "all" and "-name" exclusions, e.g. "all,-orchestrator". Keycloak is
-# always included because OIDC authentication is part of every deployment,
-# unless --no-always-on is passed (teardown of explicitly selected plugins).
+# always included because OIDC authentication is part of every deployment.
+# --explicit-only is used by teardown: only plugins that are named explicitly
+# are selected, so "all" never tears down an always-on plugin such as the
+# shared Keycloak.
 resolve_plugins() {
-    local spec="${1:-}" include_always_on=true token name
-    [[ "${2:-}" == "--no-always-on" ]] && include_always_on=false
+    local spec="${1:-}" explicit_only=false token name
+    [[ "${2:-}" == "--explicit-only" ]] && explicit_only=true
     local -A selected=()
     local -a add=() remove=() tokens
 
@@ -244,7 +257,12 @@ resolve_plugins() {
         token="${token//[[:space:]]/}"
         [[ -z "$token" ]] && continue
         if [[ "$token" == "all" ]]; then
-            for name in "${PLUGIN_NAMES[@]}"; do add+=("$name"); done
+            for name in "${PLUGIN_NAMES[@]}"; do
+                # Always-on plugins are shared infrastructure: "all" must not
+                # include them when only explicitly named plugins are selected.
+                [[ "$explicit_only" == "true" && " ${ALWAYS_ON_PLUGINS[*]} " == *" ${name} "* ]] && continue
+                add+=("$name")
+            done
         elif [[ "$token" == -* ]]; then
             remove+=("${token#-}")
         else
@@ -266,9 +284,11 @@ resolve_plugins() {
         fi
         unset "selected[${name}]"
     done
-    for name in "${ALWAYS_ON_PLUGINS[@]}"; do
-        [[ "$include_always_on" == "true" ]] && selected["$name"]=1
-    done
+    if [[ "$explicit_only" == "false" ]]; then
+        for name in "${ALWAYS_ON_PLUGINS[@]}"; do
+            selected["$name"]=1
+        done
+    fi
 
     PLUGIN_LIST=()
     for name in "${PLUGIN_NAMES[@]}"; do
@@ -344,9 +364,11 @@ build_app_config() {
 
     yq eval-all '. as $item ireduce ({}; . * $item)' "${args[@]}" > "$output"
 
-    # A GitHub token is optional. Only referenced when supplied so public
-    # access stays the default.
+    # A GitHub token is optional. Reference it without inlining the value: the
+    # Secret is already injected into the pod as GITHUB_TOKEN, and writing the
+    # token here would expose it in a ConfigMap. An existing block is replaced
+    # because Backstage replaces arrays when config files are merged.
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        yq -i '(.integrations.github[0].token) = strenv(GITHUB_TOKEN)' "$output"
+        yq -i '.integrations.github = [{"host": "github.com", "token": "${GITHUB_TOKEN}"}]' "$output"
     fi
 }

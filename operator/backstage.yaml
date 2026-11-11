@@ -53,3 +53,14 @@ spec:
                     - configMap:
                         name: resources-config-map
                         optional: true
+              # The operator default is 2Gi. Match the Helm chart and RHDH CI,
+              # where the same volume is raised to 5Gi.
+              - name: dynamic-plugins-root
+                ephemeral:
+                  volumeClaimTemplate:
+                    spec:
+                      accessModes:
+                        - ReadWriteOnce
+                      resources:
+                        requests:
+                          storage: 5Gi

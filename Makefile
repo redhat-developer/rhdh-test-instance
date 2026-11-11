@@ -64,9 +64,9 @@ else
 	./teardown.sh operator --namespace $(NAMESPACE)
 endif
 
-undeploy-plugins: ## Teardown plugin infrastructure only, leave RHDH running (PLUGINS=lighthouse,keycloak)
+undeploy-plugins: ## Teardown plugin infrastructure only, leave RHDH running (PLUGINS=lighthouse)
 ifndef PLUGINS
-	$(error PLUGINS is required, e.g. make undeploy-plugins PLUGINS=lighthouse)
+	$(error PLUGINS is required, e.g. make undeploy-plugins PLUGINS=lighthouse. Use make undeploy-keycloak for the shared Keycloak.)
 endif
 	TEARDOWN=true NAMESPACE=$(NAMESPACE) KEYCLOAK_NS=$(KEYCLOAK_NS) bash scripts/config-plugins.sh $(PLUGINS)
 
@@ -79,7 +79,14 @@ deploy-keycloak: ## Pre-create the shared Keycloak, realm and test users (run on
 undeploy-infra: ## Uninstall orchestrator infra chart
 	helm uninstall orchestrator-infra -n $(NAMESPACE) || true
 
-uninstall-operator: ## Uninstall the RHDH operator (deletes the operator namespace)
+uninstall-operator: ## Uninstall the RHDH operator, its OLM v1 resources and the operator namespace
+	@if oc api-resources --api-group=olm.operatorframework.io 2>/dev/null | grep -q "^clusterextensions "; then \
+		oc delete clusterextension.olm.operatorframework.io rhdh --ignore-not-found; \
+		for catalog in rhdh-fast-$(shell grep -oE '^[0-9]+\.[0-9]+' <<< "$(VERSION)") rhdh rhdh-default; do \
+			oc delete clustercatalog.olm.operatorframework.io "$$catalog" --ignore-not-found; \
+		done; \
+	fi
+	oc delete clusterrolebinding rhdh-installer-binding --ignore-not-found
 	oc delete project $(OPERATOR_NAMESPACE) --ignore-not-found
 	@echo "Operator uninstalled. RHDH CRDs may linger until all Backstage CRs are removed."
 
@@ -153,7 +160,7 @@ endif
 		-e ENABLE_OLLAMA -e OLLAMA_URL \
 		-e ENABLE_VERTEX_AI -e VERTEX_AI_PROJECT -e VERTEX_AI_LOCATION \
 		$(RUNNER_IMAGE) \
-		bash -c 'oc login --token="$$K8S_CLUSTER_TOKEN" --server="$$K8S_CLUSTER_URL" --insecure-skip-tls-verify=true >/dev/null && source .env && $(CMD)'
+		bash -c 'oc login --token="$$K8S_CLUSTER_TOKEN" --server="$$K8S_CLUSTER_URL" --insecure-skip-tls-verify=true >/dev/null && { [ ! -f .env ] || source .env; } && $(CMD)'
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
