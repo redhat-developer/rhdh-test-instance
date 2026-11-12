@@ -1,5 +1,12 @@
+# The bundled catalog defaults are the base configuration. Plugin overrides for
+# the selected --plugins are appended at deploy time.
 includes:
   - dynamic-plugins.default.yaml
 plugins:
-  - package: ./dynamic-plugins/dist/backstage-community-plugin-analytics-provider-segment
-    disabled: true
+  # The product enables the Segment analytics provider by default. Test
+  # instances must not send telemetry, so it is disabled explicitly. The
+  # SEGMENT_TEST_MODE fallback stays set in the Helm values and the Operator CR
+  # in case the provider is ever re-enabled. Adoption Insights is a separate
+  # analytics module and stays enabled.
+  - package: ref://backstage-community-plugin-analytics-provider-segment
+    enabled: false

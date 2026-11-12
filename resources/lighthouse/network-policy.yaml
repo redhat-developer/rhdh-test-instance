@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rhdh-lighthouse-egress
+spec:
+  podSelector:
+    matchLabels:
+      backstage.io/kubernetes-id: developer-hub
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: lighthouse
+      ports:
+        - port: 3003
+          protocol: TCP

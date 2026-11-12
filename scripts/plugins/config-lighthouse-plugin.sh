@@ -41,7 +41,9 @@ deploy_lighthouse() {
       --namespace="${NAMESPACE}"
   fi
 
-  oc apply -f "$PWD/resources/lighthouse/lighthouse-deployment.yaml" \
+  oc apply -f "${DEPLOY_ROOT}/resources/lighthouse/lighthouse-deployment.yaml" \
+    --namespace="${NAMESPACE}"
+  oc apply -f "${DEPLOY_ROOT}/resources/lighthouse/network-policy.yaml" \
     --namespace="${NAMESPACE}"
   echo "Lighthouse deployment applied!"
 }
@@ -71,7 +73,7 @@ run_lighthouse_initial_scan() {
   sed \
     -e "s|<RHDH_URL>|${RHDH_URL}|g" \
     -e "s|<LIGHTHOUSE_SVC>|${LIGHTHOUSE_SVC}|g" \
-    "$PWD/resources/lighthouse/lighthouse-scan-job.yaml" \
+    "${DEPLOY_ROOT}/resources/lighthouse/lighthouse-scan-job.yaml" \
     | oc apply -f - --namespace="${NAMESPACE}"
 
   echo "Lighthouse scan job submitted — it will complete in the background once RHDH is up."
@@ -121,9 +123,8 @@ config_secrets_for_lighthouse_plugins() {
   oc patch secret rhdh-secrets -n "${NAMESPACE}" \
     --type=merge -p "{\"stringData\":{\"LIGHTHOUSE_URL\":\"${LIGHTHOUSE_URL}\",\"LIGHTHOUSE_SVC_URL\":\"${LIGHTHOUSE_SVC_URL}\"}}"
 
-  _append_plugin_dynamic_config "${PWD}/resources/lighthouse/dynamic-plugins.yaml" "Lighthouse"
 
-  echo "Lighthouse plugin overlay applied!"
+  echo "Lighthouse plugin secret configured!"
 }
 
 # =============================================================================
@@ -163,7 +164,9 @@ uninstall_lighthouse() {
   # here.
   oc delete job lighthouse-initial-scan \
     --namespace="${NAMESPACE}" 2>/dev/null || true
-  oc delete -f "$PWD/resources/lighthouse/lighthouse-deployment.yaml" \
+  oc delete -f "${DEPLOY_ROOT}/resources/lighthouse/lighthouse-deployment.yaml" \
+    --namespace="${NAMESPACE}" 2>/dev/null || true
+  oc delete -f "${DEPLOY_ROOT}/resources/lighthouse/network-policy.yaml" \
     --namespace="${NAMESPACE}" 2>/dev/null || true
   oc delete secret lighthouse-credentials \
     --namespace="${NAMESPACE}" 2>/dev/null || true
@@ -172,32 +175,7 @@ uninstall_lighthouse() {
 }
 
 # =============================================================================
-# Main (standalone execution)
+# These functions are sourced by scripts/config-plugins.sh. There is no
+# standalone entry point: the setup needs the namespace and URLs resolved by
+# deploy.sh.
 # =============================================================================
-main() {
-  if [[ ! -f "${PWD}/.env" ]]; then
-    echo "Error: .env file not found. Copy .env.example to .env and fill in your values."
-    exit 1
-  fi
-  source "${PWD}/.env"
-
-  echo "=============================================="
-  echo "Configuring Lighthouse Plugin"
-  echo "=============================================="
-
-  deploy_lighthouse
-  config_secrets_for_lighthouse_plugins
-  apply_lighthouse_labels
-  run_lighthouse_initial_scan
-
-  echo ""
-  echo "=============================================="
-  echo "Lighthouse configuration complete!"
-  echo "=============================================="
-
-  exit "${OVERALL_RESULT:-0}"
-}
-
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  main
-fi

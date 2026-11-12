@@ -1,0 +1,7 @@
+# MCP actions backend exposes the built-in catalog and scaffolder actions to MCP
+# clients such as the Intelligent Assistant. It is not part of the bundled
+# plugin catalog, so the overlay image is pinned. Keep the bs_ tag in sync with
+# the Backstage version of the RHDH release (checked by make verify-plugins).
+plugins:
+  - package: oci://ghcr.io/redhat-developer/rhdh-plugin-export-overlays/backstage-plugin-mcp-actions-backend:bs_1.54.9__0.2.1!backstage-plugin-mcp-actions-backend
+    enabled: true

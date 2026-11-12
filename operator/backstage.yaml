@@ -1,0 +1,69 @@
+apiVersion: rhdh.redhat.com/v1alpha5
+kind: Backstage
+metadata:
+  name: developer-hub
+spec:
+  application:
+    appConfig:
+      mountPath: /opt/app-root/src
+      configMaps:
+        - name: app-config-rhdh
+    route:
+      enabled: true
+    dynamicPluginsConfigMapName: dynamic-plugins
+    extraEnvs:
+      envs:
+        # Fallback only: the Segment analytics provider is disabled in
+        # config/dynamic-plugins.yaml, but the plugin reads this as
+        # app.analytics.segment.testMode if it is ever re-enabled.
+        - name: SEGMENT_TEST_MODE
+          value: "true"
+        # Cluster-pool ingress certificates are self-signed.
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+      secrets:
+        - name: rhdh-secrets
+  database:
+    enableLocalDb: true
+  flavours: []
+  deployment:
+    patch:
+      spec:
+        replicas: 1
+        template:
+          metadata:
+            labels:
+              backstage.io/kubernetes-id: developer-hub
+          spec:
+            automountServiceAccountToken: true
+            containers:
+              - name: backstage-backend
+                volumeMounts:
+                  - name: catalog-entities
+                    mountPath: /opt/app-root/src/catalog-entities
+            volumes:
+              - name: catalog-entities
+                projected:
+                  sources:
+                    - configMap:
+                        name: plugins-config-map
+                    - configMap:
+                        name: operators-config-map
+                        optional: true
+                    - configMap:
+                        name: components-config-map
+                        optional: true
+                    - configMap:
+                        name: resources-config-map
+                        optional: true
+              # The operator default is 2Gi. Match the Helm chart and RHDH CI,
+              # where the same volume is raised to 5Gi.
+              - name: dynamic-plugins-root
+                ephemeral:
+                  volumeClaimTemplate:
+                    spec:
+                      accessModes:
+                        - ReadWriteOnce
+                      resources:
+                        requests:
+                          storage: 5Gi

@@ -1,114 +1,146 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for working in this repository.
 
-## Project Overview
+## Project overview
 
-This repository provides **PR-driven deployment of Red Hat Developer Hub (RHDH) test instances** on OpenShift clusters. Users open a PR (optionally with custom configuration changes) and use the `/test deploy` slash command in PR comments to trigger automated deployment via Prow CI. The system handles cluster provisioning, Keycloak auth setup, RHDH installation, and posts deployment URLs and credentials back to the PR.
+This repository provides **PR-driven deployment of Red Hat Developer Hub (RHDH)
+test instances** on OpenShift. Users open a PR (optionally with configuration
+changes) and comment `/test deploy <helm|operator> <version> [duration]
+[--plugins <list>]`. Prow provisions the cluster, runs `deploy.sh`, and posts the
+URL and credentials back to the PR.
 
-Two installation methods are supported (Helm and Operator), with optional Orchestrator components. Local deployment is also possible as a secondary use case. The codebase is entirely Bash scripts and YAML configuration.
+Primary use case: RHDH Test Day — many instances in separate namespaces on one
+cluster, sharing a single Keycloak.
 
-## GitHub PR Workflow (Primary Use Case)
+The codebase is Bash and YAML only.
 
-Users deploy test instances by commenting on PRs:
+## Supported versions
+
+`2.2`, `2.2.<patch>`, `2.2-<build>-CI`, and `next` (newest CI stream). The
+supported release lines live in `SUPPORTED_RELEASE_LINES` in
+`scripts/deployment-common.sh`; everything else is derived from the version.
+
+## Deployment flow
 
 ```
-/test deploy <install-type> <version> [duration]
+deploy.sh
+├── parses <helm|operator> <version> [--namespace] [--plugins]
+├── sources .env (local) or uses CI-injected GSM secrets (OPENSHIFT_CI=true)
+├── resolves plugins, builds the merged configuration:
+│   ├── app-config-rhdh.yaml   base config + selected plugins' app-config.yaml
+│   └── dynamic-plugins.yaml   bundled defaults + selected plugins' entries
+├── creates the namespace, computes RHDH_BASE_URL and CLUSTER_ROUTER_BASE
+├── scripts/setup-resources.sh: rhdh-secrets, ConfigMaps, catalog entities,
+│   image imports, demo workloads
+├── scripts/config-plugins.sh: plugin setup steps, round-robin
+│   └── keycloak is always on: shared Keycloak + per-namespace OIDC client
+└── helm/deploy.sh or operator/deploy.sh
 ```
 
-- `install-type`: `helm` or `operator`
-- `version`: `1.9`, `1.9-190-CI`, `next`
-- `duration`: optional cleanup timer (e.g., `4h`, `2.5h`; default `3h`)
+## Plugins
 
-Examples:
-```
-/test deploy helm 1.7 4h
-/test deploy operator 1.6 2.5h
-```
+Every optional feature is a plugin selected with `--plugins` / `PLUGINS`:
+`kubernetes`, `bulk-import`, `intelligent-assistant`, `orchestrator`,
+`scorecard`, `rbac`, `lighthouse`. `all` enables every plugin; `-name` excludes
+one (`all,-orchestrator`). `keycloak` is always on.
 
-The bot responds with RHDH URL, OpenShift console link, and cluster credentials (from Vault). Users can test custom configurations by modifying config files in the PR branch before deploying. Max two concurrent instances.
+A plugin may contribute:
 
-Prow job status: https://prow.ci.openshift.org/?repo=redhat-developer%2Frhdh-test-instance&type=presubmit&job=pull-ci-redhat-developer-rhdh-test-instance-main-deploy
+- `resources/<name>/dynamic-plugins.yaml` — plugin entries
+- `resources/<name>/app-config.yaml` — merged into `app-config-rhdh`
+- `resources/<name>/*.yaml` — resources applied by its setup functions
+- `scripts/plugins/config-<name>-plugin.sh` — setup/teardown functions
+- an entry in `PLUGIN_SETUP_FUNCTIONS` / `PLUGIN_TEARDOWN_FUNCTIONS` in
+  `scripts/config-plugins.sh` (`":"` for config-only plugins)
 
-## Local Deployment Commands
+Orchestrator and Intelligent Assistant plugins are supplied by the Helm chart
+and the Operator flavours; do not duplicate them in `dynamic-plugins.yaml`.
 
-### Deploy
+## Key files
+
+- `scripts/deployment-common.sh` — version parsing, plugin resolution, merged
+  configuration builders, catalog image resolution
+- `scripts/config-plugins.sh` — plugin registry and round-robin executor
+- `scripts/setup-resources.sh` — namespace-scoped resources and teardown
+- `scripts/verify-plugins.sh` — renders the deployment and runs the real
+  installer; `make verify-plugins`
+- `helm/deploy.sh`, `helm/value_file.yaml` — chart values and install
+- `operator/install-operator.sh`, `operator/deploy.sh`, `operator/render-cr.sh` —
+  OLM installation and the `rhdh.redhat.com/v1alpha5` Backstage CR
+- `.github/workflows/verify-plugins.yaml` — verification for 2.2 and next
+
+## Conventions
+
+- **Defaults first.** Do not override product defaults in the base config. If a
+  default is broken, file a bug instead of hiding it (this is why the sidebar
+  search button is not hidden).
+- **`app.extensions` is restated.** Backstage replaces arrays across config
+  files, so `config/app-config-rhdh.yaml` repeats the product defaults
+  (`page:home`, the duplicate search widget toggle, the TechDocs add-ons) before
+  adding the language list. `make verify-plugins` fails on drift.
+- **`ref://` for bundled plugins.** Entries available in the catalog use
+  `ref://`. Plugins missing from the catalog (MCP actions backend, Lighthouse)
+  use pinned overlay images with explicit `bs_<backstage>__<version>` tags.
+  `make verify-plugins` checks the pins against the release's Backstage version.
+- **Per-plugin files are `plugins:` documents.** `resources/<name>/dynamic-plugins.yaml`
+  has the same layout as the Operator flavours: a `plugins:` list, merged by
+  `build_dynamic_plugins`.
+- **Both install methods must work.** Component plugins come from the chart or
+  the Operator flavour so Helm and Operator stay aligned.
+- **`SEGMENT_TEST_MODE=true`** is set for both methods as a fallback; the Segment
+  analytics provider (`backstage-community-plugin-analytics-provider-segment`) is
+  disabled in `config/dynamic-plugins.yaml` so test instances send no telemetry.
+  Adoption Insights is a separate analytics module and stays enabled.
+- **Secrets are generated at deploy time** (`SESSION_SECRET`, `BACKEND_SECRET`,
+  `MCP_TOKEN`). Only `RHDH_GITHUB_TOKEN`, `SONARQUBE_API_KEY` and LLM credentials
+  are copied from the environment, and only when provided. The GitHub token has
+  its own name so an unrelated `GITHUB_TOKEN` is never copied into the cluster.
+- Keycloak uses a **plain HTTP route**: cluster-pool ingress certificates are
+  self-signed.
+- Do not add release-specific workarounds (specific RC builds, catalog digests,
+  `OPERATOR_EXPECTED_*` checks). `VERSION` selects the release.
+
+## Verification
 
 ```bash
-# Helm deployment (primary method)
-make deploy-helm VERSION=1.9 NAMESPACE=rhdh
-
-# Helm with orchestrator
-make deploy-helm VERSION=1.9 ORCH=true
-
-# Operator deployment (requires install-operator first)
-make install-operator VERSION=1.9
-make deploy-operator VERSION=1.9
+make verify-plugins VERSION=2.2 PLUGINS=all
+bash scripts/verify-plugins.sh --version 2.2 --plugins all --native  # macOS
 ```
 
-### Teardown
+The script renders the chart, runs the init container's installer against the
+rendered plugin list, checks pinned overlay tags against the Backstage version,
+and validates the Operator CR. It needs `helm`, `yq`, `jq` and `podman`
+(or Node 22+ and `skopeo` with `--native`).
+
+## Local commands
 
 ```bash
-make undeploy-helm        # Remove Helm-deployed RHDH
-make undeploy-operator    # Remove Operator-deployed RHDH
-make undeploy-infra       # Remove Keycloak
-make clean                # Remove everything (RHDH + Keycloak)
+make deploy-helm VERSION=2.2 PLUGINS=kubernetes,rbac
+make deploy-operator VERSION=2.2 PLUGINS=all,-orchestrator
+make install-operator VERSION=2.2      # one-time per cluster, runs in a container
+make deploy-keycloak                   # one-time: shared Keycloak, realm, users
+make undeploy-helm                     # keeps shared Keycloak and the Operator
+make undeploy-keycloak                 # only when no instances remain
+make status logs url
+make smoke NAMESPACE=rhdh              # Playwright checks against a live instance
 ```
 
-### Debugging
+`/test deploy` runs the same smoke suite (`scripts/run-smoke.sh`) automatically
+after the rollout and reports the result in the PR; a failure does not tear down
+the instance. `make uninstall-operator` refuses while Backstage instances exist
+unless `FORCE=true`, because the OLM v1 ClusterExtension takes the CRDs with it.
+Only RHDH 2.2 and `next` are supported (`SUPPORTED_RELEASE_LINES`); 2.1 is out
+of scope.
 
-```bash
-make status    # Show pod status in namespace
-make logs      # Tail RHDH pod logs
-make url       # Print the RHDH portal URL
-```
+## Intelligent Assistant specifics
 
-### Makefile Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `NAMESPACE` | `rhdh` | OpenShift namespace for RHDH |
-| `VERSION` | `1.9` | RHDH version (supports `1.9`, `1.9-190-CI`, `next`) |
-| `ORCH` | `false` | Enable Orchestrator components |
-| `CATALOG_INDEX_TAG` | auto-detected | Plugin catalog index tag |
-
-## Architecture
-
-```
-deploy.sh (entry point)
-├── Parses args: method (helm/operator), version, namespace, --with-orchestrator
-├── Sources secrets from .env (local) or Vault (CI)
-├── Deploys Keycloak via utils/keycloak/keycloak-deploy.sh
-├── Creates namespace and app-config ConfigMap from config/
-└── Delegates to:
-    ├── helm/deploy.sh     — Resolves version from Quay API, installs RHDH Helm chart
-    └── operator/deploy.sh — Applies Backstage CR after optional operator install
-```
-
-### Key directories
-
-- **config/** — RHDH application config (app-config-rhdh.yaml), dynamic plugin definitions, and Kubernetes Secret templates. These are applied as ConfigMaps/Secrets to the cluster.
-- **helm/** — Helm-specific deployment: `deploy.sh` resolves chart versions from Quay, `value_file.yaml` provides Helm overrides.
-- **operator/** — Operator-based deployment: `install-operator.sh` installs the RHDH operator CRD, `deploy.sh` applies the Backstage CR from `subscription.yaml`.
-- **utils/keycloak/** — Full Keycloak deployment automation: Helm install, realm/client/user/group creation via Keycloak REST API. Test users defined in `users.json`, groups in `groups.json`.
-
-### Deployment flow
-
-1. Keycloak is deployed first (Bitnami Helm chart) with an OIDC client (`rhdh-client`) and test users (`test1`/`test2`, password: `test1@123`/`test2@123`).
-2. Environment variables (Keycloak URLs, credentials) are exported and substituted into `config/rhdh-secrets.yaml`.
-3. `config/app-config-rhdh.yaml` configures RHDH with OIDC auth pointing to Keycloak and catalog entity locations from GitHub.
-4. For Helm: the RHDH chart is installed with dynamic plugins config. For Operator: a Backstage CR is applied referencing the ConfigMaps.
-5. When `ORCH=true`, orchestrator plugins are merged into `dynamic-plugins.yaml` and serverless operators are installed.
-
-### Secrets
-
-- **PR deployments (primary):** secrets pulled automatically from Vault at `vault.ci.openshift.org` under `selfservice/rhdh-test-instance/`
-- **Local deployments:** secrets loaded from `.env` file (copy `.env.example` to `.env`); Vault is used when `.env` is absent
-
-## Required CLI Tools
-
-`oc`, `helm`, `jq`, `curl`, `podman` (or `docker` for container-based operator install)
-
-## Version Resolution
-
-Helm deploy resolves semantic versions (e.g., `1.9`) to the latest patch by querying the Quay.io API for available chart tags. CI versions like `1.9-190-CI` and `next` are passed through directly.
+- OKP is not supported: the no-OKP stack (`lightspeed-stack-no-okp.yaml`) is
+  always used when a provider is configured.
+- Object names: `intelligent-assistant-stack` ConfigMap (key
+  `lightspeed-stack.yaml`), `intelligent-assistant-secrets` Secret,
+  `rhdh-intelligent-assistant-egress` NetworkPolicy,
+  `INTELLIGENT_ASSISTANT_STACK_FILE` env override.
+- The MCP actions backend is pinned in
+  `resources/intelligent-assistant/dynamic-plugins.yaml`; plugin-side app-config
+  (DCR, static token, action sources) lives in its `app-config.yaml`.

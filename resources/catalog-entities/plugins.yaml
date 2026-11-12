@@ -18,3 +18,21 @@ data:
         - https://github.com/backstage/community-plugins/blob/main/workspaces/lighthouse/plugins/lighthouse/catalog-info.yaml
         - https://github.com/backstage/community-plugins/blob/main/workspaces/sonarqube/plugins/sonarqube/catalog-info.yaml
         - https://github.com/backstage/community-plugins/blob/main/workspaces/sonarqube/plugins/sonarqube-backend/catalog-info.yaml
+  topology-test.yaml: |
+    apiVersion: backstage.io/v1alpha1
+    kind: Component
+    metadata:
+      name: topology-test
+      title: Topology Test
+      description: Test component for validating the Kubernetes and Topology plugins against live cluster resources
+      annotations:
+        backstage.io/kubernetes-id: developer-hub
+        backstage.io/kubernetes-namespace: ${NAMESPACE}
+      tags:
+        - test
+        - topology
+        - kubernetes
+    spec:
+      type: service
+      lifecycle: production
+      owner: group:default/developers

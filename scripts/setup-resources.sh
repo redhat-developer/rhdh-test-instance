@@ -1,38 +1,31 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # =============================================================================
-# setup-resources.sh — Cluster resource provisioning for RHDH test instances
+# setup-resources.sh — Cluster resources shared by every deployment method
 #
-# Applies resources that are always present regardless of which plugins are
-# enabled. Running this before plugin configuration ensures:
-#   - The catalog is populated from the start (not empty on first login)
-#   - Image streams are pre-imported to avoid Docker Hub rate limits
-#   - RBAC policies and demo resources are in place before RHDH starts
+# Creates the namespace-scoped resources an RHDH instance needs regardless of
+# which optional plugins are enabled:
+#   - rhdh-secrets (base URL, session/backend/MCP secrets, GitHub token)
+#   - app-config-rhdh and dynamic-plugins ConfigMaps (merged at deploy time)
+#   - catalog entity ConfigMaps
+#   - image stream pre-imports and demo workloads
 #
-# Catalog entities are registered unconditionally. Even when a backing
-# plugin/service is not deployed, having its entities present keeps the
-# catalog usable for browsing, RBAC testing, and demo purposes. Plugin
-# scripts are responsible for their own infrastructure (deployments, secrets,
-# scans) but should not own catalog metadata — that lives here.
-#
-# Usage (from deploy.sh):  source scripts/setup-resources.sh; setup_resources
-# Usage (standalone):      NAMESPACE=rhdh ./scripts/setup-resources.sh
+# The app-config and dynamic-plugins ConfigMaps are built by deploy.sh from the
+# base configuration plus the selected plugins. APP_CONFIG_FILE and
+# DYNAMIC_PLUGINS_FILE point at those generated files.
 # =============================================================================
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$(dirname "$DIR")"
 
+_random_secret() {
+  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-32}"
+}
+
 # =============================================================================
 # RHDH Secrets
 #
-# Create (or idempotently update) the rhdh-secrets Secret with the base URL
-# that is known at deploy time. Plugin scripts patch in their own keys later
-# (e.g. KEYCLOAK_* from config-keycloak-plugin.sh, LIGHTHOUSE_URL from
-# config-lighthouse-plugin.sh) using `oc patch secret rhdh-secrets`.
-#
-# All keys from the full secret schema are initialised here so that the
-# Secret always has a consistent shape. Empty values are replaced by plugin
-# scripts as they configure their respective services.
+# Plugin scripts patch their own keys in later (Keycloak, Lighthouse, Scorecard).
 # =============================================================================
 create_rhdh_secrets() {
   echo ""
@@ -41,19 +34,27 @@ create_rhdh_secrets() {
   : "${RHDH_BASE_URL:?RHDH_BASE_URL must be set before setup-resources.sh runs}"
 
   if oc get secret rhdh-secrets --namespace="${NAMESPACE}" &>/dev/null; then
-    # Secret already exists — only update RHDH_BASE_URL so the URL stays
-    # current without rotating SESSION_SECRET or clearing plugin-owned keys.
-    oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge \
-      -p "{\"stringData\":{\"RHDH_BASE_URL\":\"${RHDH_BASE_URL}\"}}"
-    echo "rhdh-secrets already exists — updated RHDH_BASE_URL only."
-  else
-    # Generate a random session secret at deploy time so it is never hardcoded.
-    local session_secret
-    session_secret=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+    # Keep existing values; only refresh the URL and ensure the secrets that the
+    # configuration references are present. An explicitly supplied MCP_TOKEN
+    # overrides the stored one.
+    local backend_secret mcp_token
+    backend_secret=$(oc get secret rhdh-secrets -n "${NAMESPACE}" -o jsonpath='{.data.BACKEND_SECRET}' 2>/dev/null \
+      | (base64 -d 2>/dev/null || true))
+    [[ -n "$backend_secret" ]] || backend_secret=$(_random_secret)
+    mcp_token=$(oc get secret rhdh-secrets -n "${NAMESPACE}" -o jsonpath='{.data.MCP_TOKEN}' 2>/dev/null \
+      | (base64 -d 2>/dev/null || true))
+    mcp_token="${MCP_TOKEN:-${mcp_token:-$(_random_secret)}}"
 
+    jq -n --arg url "$RHDH_BASE_URL" --arg backend "$backend_secret" --arg mcp "$mcp_token" \
+      '{stringData: {RHDH_BASE_URL: $url, BACKEND_SECRET: $backend, MCP_TOKEN: $mcp}}' \
+      | oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge --patch-file=/dev/stdin
+    echo "rhdh-secrets already exists — refreshed RHDH_BASE_URL, BACKEND_SECRET and MCP_TOKEN."
+  else
     oc create secret generic rhdh-secrets \
       --from-literal=RHDH_BASE_URL="${RHDH_BASE_URL}" \
-      --from-literal=SESSION_SECRET="${session_secret}" \
+      --from-literal=SESSION_SECRET="$(_random_secret)" \
+      --from-literal=BACKEND_SECRET="$(_random_secret)" \
+      --from-literal=MCP_TOKEN="${MCP_TOKEN:-$(_random_secret)}" \
       --from-literal=KEYCLOAK_BASE_URL="${KEYCLOAK_BASE_URL:-}" \
       --from-literal=KEYCLOAK_METADATA_URL="${KEYCLOAK_METADATA_URL:-}" \
       --from-literal=KEYCLOAK_LOGIN_REALM="${KEYCLOAK_LOGIN_REALM:-}" \
@@ -66,96 +67,76 @@ create_rhdh_secrets() {
 
     echo "rhdh-secrets created!"
   fi
+
+  # Optional GitHub token, opt-in through RHDH_GITHUB_TOKEN so a GITHUB_TOKEN
+  # exported for other tools is never copied into the cluster. It enables
+  # private catalog locations, bulk import and write operations; public access
+  # remains the default.
+  if [[ -n "${RHDH_GITHUB_TOKEN:-}" ]]; then
+    jq -n --arg token "$RHDH_GITHUB_TOKEN" '{stringData: {GITHUB_TOKEN: $token}}' \
+      | oc patch secret rhdh-secrets -n "${NAMESPACE}" --type=merge --patch-file=/dev/stdin
+    echo "GitHub token configured from RHDH_GITHUB_TOKEN."
+  fi
+}
+
+# =============================================================================
+# RHDH ConfigMaps
+# =============================================================================
+apply_rhdh_configmaps() {
+  echo ""
+  echo "Applying RHDH ConfigMaps..."
+
+  local app_config="${APP_CONFIG_FILE:-${ROOT_DIR}/config/app-config-rhdh.yaml}"
+  local dynamic_plugins="${DYNAMIC_PLUGINS_FILE:-${ROOT_DIR}/config/dynamic-plugins.yaml}"
+
+  oc create configmap app-config-rhdh \
+    --from-file=app-config-rhdh.yaml="${app_config}" \
+    --namespace="${NAMESPACE}" \
+    --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
+
+  # Replace instead of apply: dynamic plugin lists must not accumulate between
+  # repeated deployments.
+  oc create configmap dynamic-plugins \
+    --from-file=dynamic-plugins.yaml="${dynamic_plugins}" \
+    --namespace="${NAMESPACE}" \
+    --dry-run=client -o yaml | oc replace --force -f - --namespace="${NAMESPACE}"
+
+  echo "RHDH ConfigMaps applied!"
 }
 
 # =============================================================================
 # Catalog Entities
 #
-# Apply all catalog entity ConfigMaps unconditionally so the catalog is
-# populated regardless of which plugins are enabled. All files in
-# resources/catalog-entities/ are pre-wrapped ConfigMaps and applied directly.
-#
-# Entities are organised by Backstage kind, not by plugin:
-#   components.yaml — Component entities (services, websites, etc.)
-#   operators.yaml  — operator/infrastructure Resource entities
-#   resources.yaml  — general Resource entities (storage, etc.)
-#   plugins.yaml    — Location entities pointing at upstream plugin catalog-info
-#
-# Adding entities for a new plugin means adding them to the appropriate file
-# for their Backstage kind rather than creating a new per-plugin ConfigMap.
+# Applied unconditionally so the catalog is populated regardless of which
+# plugins are enabled.
 # =============================================================================
 apply_catalog_entities() {
   echo ""
   echo "Applying catalog entity ConfigMaps..."
 
   local catalog_dir="${ROOT_DIR}/resources/catalog-entities"
+  local yaml_file
 
   for yaml_file in "${catalog_dir}"/*.yaml; do
     echo "  Applying: $(basename "$yaml_file")"
-    envsubst '${RHDH_BASE_URL}' < "${yaml_file}" | oc apply -f - --namespace="${NAMESPACE}"
+    envsubst '${RHDH_BASE_URL} ${NAMESPACE} ${KEYCLOAK_NS}' < "${yaml_file}" | oc apply -f - --namespace="${NAMESPACE}"
   done
 
   echo "Catalog entities applied!"
 }
 
 # =============================================================================
-# RHDH ConfigMaps
-#
-# Create (or idempotently update) the app-config-rhdh and dynamic-plugins
-# ConfigMaps from their source files in config/. These must exist before
-# plugin scripts run since _append_plugin_dynamic_config reads dynamic-plugins.
-# =============================================================================
-apply_rhdh_configmaps() {
-  echo ""
-  echo "Applying RHDH ConfigMaps..."
-
-  oc create configmap app-config-rhdh \
-    --from-file="${ROOT_DIR}/config/app-config-rhdh.yaml" \
-    --namespace="${NAMESPACE}" \
-    --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
-
-  oc create configmap app-config-guest-auth \
-    --from-file="${ROOT_DIR}/config/app-config-guest-auth.yaml" \
-    --namespace="${NAMESPACE}" \
-    --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
-
-  oc create configmap dynamic-plugins \
-    --from-file="${ROOT_DIR}/config/dynamic-plugins.yaml" \
-    --namespace="${NAMESPACE}" \
-    --dry-run=client -o yaml | oc apply -f - --namespace="${NAMESPACE}"
-
-  echo "RHDH ConfigMaps applied!"
-}
-
-# =============================================================================
-# RBAC Policies
-#
-# Apply the RBAC policy ConfigMap that ships with the repo. This is always
-# applied so that test users and roles are available from the first login,
-# independent of which plugins are enabled.
-# =============================================================================
-apply_rbac_policies() {
-  echo ""
-  echo "Applying RBAC policies..."
-
-  oc apply -f "${ROOT_DIR}/config/rbac-policies.yaml" \
-    --namespace="${NAMESPACE}"
-
-  echo "RBAC policies applied!"
-}
-
-# =============================================================================
 # Image Stream Imports
 #
 # Pre-import container images from external registries to avoid rate-limit
-# failures during plugin deployment. Applied before plugin scripts run so the
-# images are cached in the cluster registry by the time they are needed.
+# failures during plugin deployment.
 # =============================================================================
 apply_image_stream_imports() {
   echo ""
   echo "Applying image stream imports..."
 
   local image_stream_dir="${ROOT_DIR}/resources/image-stream-imports"
+  local yaml_file name
 
   if [[ ! -d "$image_stream_dir" ]] || [[ -z "$(ls -A "$image_stream_dir" 2>/dev/null)" ]]; then
     echo "  No image stream imports found — skipping."
@@ -163,7 +144,6 @@ apply_image_stream_imports() {
   fi
 
   for yaml_file in "${image_stream_dir}"/*.yaml; do
-    local name
     name=$(basename "$yaml_file")
     echo "  Applying: ${name}"
     oc apply -f "${yaml_file}" --namespace="${NAMESPACE}" || \
@@ -176,16 +156,14 @@ apply_image_stream_imports() {
 # =============================================================================
 # Demo Resources
 #
-# Deploy lightweight example workloads that populate the Topology and
-# Kubernetes plugin views. These are applied with graceful error handling
-# since they are non-critical and some may depend on images that are still
-# being imported (e.g. internal-alpine).
+# Lightweight example workloads that populate the Topology and Kubernetes views.
 # =============================================================================
 apply_demo_resources() {
   echo ""
   echo "Applying demo resources..."
 
   local examples_dir="${ROOT_DIR}/resources/rhdh-script-examples"
+  local yaml_file name
 
   if [[ ! -d "$examples_dir" ]] || [[ -z "$(ls -A "$examples_dir" 2>/dev/null)" ]]; then
     echo "  No demo resources found — skipping."
@@ -193,7 +171,6 @@ apply_demo_resources() {
   fi
 
   for yaml_file in "${examples_dir}"/*.yaml; do
-    local name
     name=$(basename "$yaml_file")
     echo "  Applying: ${name}"
     oc apply -f "${yaml_file}" --namespace="${NAMESPACE}" || \
@@ -205,8 +182,6 @@ apply_demo_resources() {
 
 # =============================================================================
 # Teardown
-#
-# Removes all resources created by setup_resources. Called during cleanup.
 # =============================================================================
 teardown_resources() {
   echo ""
@@ -215,12 +190,16 @@ teardown_resources() {
   echo "=============================================="
 
   local catalog_dir="${ROOT_DIR}/resources/catalog-entities"
+  local yaml_file
 
   echo "Removing rhdh-secrets Secret..."
   oc delete secret rhdh-secrets --namespace="${NAMESPACE}" 2>/dev/null || true
 
-  echo "Removing RHDH ConfigMaps..."
-  oc delete configmap app-config-rhdh app-config-guest-auth dynamic-plugins \
+  echo "Removing RHDH ConfigMaps and secrets..."
+  oc delete configmap app-config-rhdh dynamic-plugins intelligent-assistant-stack \
+    --namespace="${NAMESPACE}" 2>/dev/null || true
+  oc delete secret intelligent-assistant-secrets --namespace="${NAMESPACE}" 2>/dev/null || true
+  oc delete networkpolicy rhdh-lighthouse-egress rhdh-intelligent-assistant-egress rhdh-keycloak-egress \
     --namespace="${NAMESPACE}" 2>/dev/null || true
 
   echo "Removing catalog entity ConfigMaps..."
@@ -229,9 +208,13 @@ teardown_resources() {
   done
 
   echo "Removing RBAC policy ConfigMap..."
-  oc delete -f "${ROOT_DIR}/config/rbac-policies.yaml" \
+  oc delete -f "${ROOT_DIR}/resources/rbac/rbac-policies.yaml" \
     --namespace="${NAMESPACE}" 2>/dev/null || true
 
+  echo "Removing cluster-scoped resources for this instance..."
+  # Cluster-scoped, so it survives namespace deletion. Removed here so a
+  # teardown without --plugins kubernetes does not leave it behind.
+  oc delete clusterrolebinding "rhdh-kubernetes-plugin-${NAMESPACE}" 2>/dev/null || true
 
   echo "Removing demo resources..."
   local examples_dir="${ROOT_DIR}/resources/rhdh-script-examples"
@@ -242,31 +225,26 @@ teardown_resources() {
   fi
 
   echo ""
-  echo "=============================================="
   echo "Resource teardown complete."
-  echo "=============================================="
 }
 
-# =============================================================================
-# Main Entry Point
-# =============================================================================
 setup_resources() {
   echo ""
   echo "=============================================="
   echo "Resource Setup"
   echo "=============================================="
 
+  # Shared Keycloak namespace, used by the catalog entities.
+  export KEYCLOAK_NS="${KEYCLOAK_NS:-rhdh-keycloak}"
+
   create_rhdh_secrets
   apply_rhdh_configmaps
   apply_catalog_entities
-  apply_rbac_policies
   apply_image_stream_imports
   apply_demo_resources
 
   echo ""
-  echo "=============================================="
   echo "Resource setup complete."
-  echo "=============================================="
 }
 
 main() {

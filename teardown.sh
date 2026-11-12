@@ -1,45 +1,33 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 # =============================================================================
-# teardown.sh — Remove an RHDH test instance and associated cluster resources
+# teardown.sh — Remove an RHDH test instance and its cluster resources
 #
-# Tears down the RHDH deployment, shared cluster resources (catalog ConfigMaps,
-# RBAC, image streams, demo workloads, rhdh-secrets), and optionally plugin
-# infrastructure (Keycloak, Lighthouse).
+# Removes the RHDH deployment, namespace-scoped configuration (ConfigMaps,
+# secrets, catalog entities), and the instance's OIDC client in the shared
+# Keycloak. Shared infrastructure (Keycloak itself, the Operator) is kept unless
+# explicitly requested.
 #
 # Usage:
-#   ./teardown.sh <install-method> [--namespace <ns>] [--plugins <list>]
+#   ./teardown.sh <install-method> [--namespace <ns>] [--plugins <list>] [--clean]
 #
-# Install methods: helm, operator
 # Options:
-#   --namespace <ns>     Namespace to clean up (default: rhdh)
-#   --plugins <list>     Comma-separated plugins to also teardown (e.g. keycloak,lighthouse)
-#
-# Examples:
-#   ./teardown.sh helm
-#   ./teardown.sh helm --namespace rhdh-helm --plugins keycloak,lighthouse
-#   ./teardown.sh operator --plugins keycloak
+#   --namespace <ns>   Namespace to clean up (default: rhdh)
+#   --plugins <list>   Also teardown plugin infrastructure (e.g. lighthouse,keycloak)
+#   --clean            Delete the entire namespace after teardown
 # =============================================================================
 
-# Default values
 namespace="rhdh"
 installation_method=""
-PLUGINS=""
+# Plugin infrastructure to tear down. Only set from the command line: PLUGINS
+# from .env (used to deploy an instance) must never trigger infrastructure
+# teardown.
+plugins_arg=""
 CLEAN=false
 
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <install-method> [--namespace <ns>] [--plugins <list>] [--clean]"
-    echo "Install methods: helm, operator"
-    echo "Options:"
-    echo "  --namespace <ns>     Namespace to clean up (default: rhdh)"
-    echo "  --plugins <list>     Comma-separated plugin infra to teardown (e.g. keycloak,lighthouse)"
-    echo "  --clean              Delete the entire namespace after teardown (full wipe)"
-    echo "Examples:"
-    echo "  $0 helm"
-    echo "  $0 helm --namespace rhdh-helm --plugins keycloak,lighthouse"
-    echo "  $0 operator --plugins keycloak"
-    echo "  $0 helm --clean"
     exit 1
 fi
 
@@ -53,7 +41,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --plugins)
-            PLUGINS="$2"
+            plugins_arg="$2"
             shift 2
             ;;
         --clean)
@@ -72,7 +60,9 @@ if [[ "$installation_method" != "helm" && "$installation_method" != "operator" ]
     exit 1
 fi
 
-[[ "${OPENSHIFT_CI}" != "true" ]] && source .env
+source "$(dirname "${BASH_SOURCE[0]}")/scripts/deployment-common.sh"
+
+[[ "${OPENSHIFT_CI}" != "true" && -f .env ]] && source .env
 
 export NAMESPACE="$namespace"
 
@@ -82,25 +72,24 @@ echo "Tearing down RHDH (${installation_method}) in namespace: ${namespace}"
 echo "=============================================="
 
 # ---------------------------------------------------------------------------
-# Step 1: Tear down plugin infrastructure (Keycloak, Lighthouse, etc.)
-#         Do this first while the namespace still exists.
+# Step 1: Tear down explicitly requested plugin infrastructure while the
+#         namespace still exists.
 # ---------------------------------------------------------------------------
-if [[ -n "${PLUGINS}" ]]; then
+if [[ -n "${plugins_arg}" ]]; then
     echo ""
-    echo "Tearing down plugin infrastructure: ${PLUGINS}"
+    echo "Tearing down plugin infrastructure: ${plugins_arg}"
     source scripts/config-plugins.sh
-    TEARDOWN=true main "${PLUGINS}"
+    TEARDOWN=true main "${plugins_arg}"
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: Remove the RHDH deployment itself.
+# Step 2: Remove the RHDH deployment.
 # ---------------------------------------------------------------------------
 echo ""
 echo "Removing RHDH deployment..."
 if [[ "$installation_method" == "helm" ]]; then
     helm uninstall redhat-developer-hub -n "$namespace" || true
-    # StatefulSet PVCs are not deleted by Helm uninstall — remove explicitly so
-    # a subsequent deploy does not conflict with the leftover volume.
+    # StatefulSet PVCs are not deleted by Helm uninstall.
     oc delete pvc data-redhat-developer-hub-postgresql-0 \
         -n "$namespace" --ignore-not-found
 else
@@ -108,8 +97,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 3: Tear down shared cluster resources (catalog ConfigMaps, RBAC,
-#         image streams, demo resources, rhdh-secrets Secret).
+# Step 3: Remove the per-instance OIDC client from the shared Keycloak.
+#         Best effort: Keycloak may be gone already, or never have been used.
+# ---------------------------------------------------------------------------
+if command -v oc >/dev/null && oc get statefulset keycloak -n "${KEYCLOAK_NS:-rhdh-keycloak}" &>/dev/null; then
+    source scripts/config-plugins.sh
+    # Never wait for Keycloak during teardown.
+    TIMEOUT=0 uninstall_keycloak || echo "Warning: Could not remove the Keycloak client — continuing."
+fi
+
+# ---------------------------------------------------------------------------
+# Step 4: Remove namespace-scoped resources.
 # ---------------------------------------------------------------------------
 source scripts/setup-resources.sh
 teardown_resources

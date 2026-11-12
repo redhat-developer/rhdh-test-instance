@@ -1,0 +1,35 @@
+# Intelligent Assistant configuration that is not provided by the Helm chart or
+# the Operator flavour.
+
+auth:
+  # Per-user tokens for MCP clients (DCR). Test instances allow any redirect URI.
+  experimentalDynamicClientRegistration:
+    enabled: true
+    allowedRedirectUriPatterns:
+      - '*'
+
+backend:
+  actions:
+    # Built-in action sources exposed as MCP tools.
+    pluginSources:
+      - catalog
+      - scaffolder
+  auth:
+    externalAccess:
+      - type: legacy
+        options:
+          secret: ${BACKEND_SECRET}
+          subject: legacy-default-config
+      - type: static
+        options:
+          token: ${MCP_TOKEN}
+          subject: mcp-clients
+
+intelligent-assistant:
+  mcpServers:
+    - name: mcp-integration-tools
+      auth: dcr
+
+# Dotted tool names are rejected by some LLM providers.
+mcpActions:
+  namespacedToolNames: false

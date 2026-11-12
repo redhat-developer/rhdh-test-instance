@@ -1,119 +1,125 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -eo pipefail
 
-# Check if the required parameters are provided
+# =============================================================================
+# helm/deploy.sh — Install RHDH with the Helm chart
+#
+# Called by deploy.sh after the configuration ConfigMaps have been created.
+# Set RHDH_RENDER_ONLY=true to render the manifests instead of installing them
+# (used by scripts/verify-plugins.sh).
+# =============================================================================
+
 if [[ $# -ne 2 ]]; then
-    echo "Usage: $0 <namespace> <version>"
+    echo "Usage: $0 <namespace> <version>" >&2
     exit 1
 fi
 
 namespace="$1"
 version="$2"
-github=0 # by default don't use the Github repo unless the chart doesn't exist in the OCI registry
 
-# Validate version and determine chart version
-if [[ "$version" =~ ^([0-9]+(\.[0-9]+)?)$ ]]; then
-    CV=$(curl -s "https://quay.io/api/v1/repository/rhdh/chart/tag/?onlyActiveTags=true&limit=600" | jq -r '.tags[].name' | grep "^${version}-" | sort -V | tail -n 1)
-elif [[ "$version" =~ CI$ ]]; then
-    CV=$version
-else
-    echo "Error: Invalid helm chart version: $version"
-    [[ "$OPENSHIFT_CI" == "true" ]] && gh_comment "❌ **Error: Invalid helm chart version** 🚫\n\n📝 **Provided version:** \`$version\`\n\nPlease check your version and try again! 🔄"
+source "$(dirname "${BASH_SOURCE[0]}")/../scripts/deployment-common.sh"
+parse_rhdh_version "$version"
+resolve_plugins "${PLUGINS_RESOLVED:-${PLUGINS:-}}"
+
+CV="${RESOLVED_HELM_CHART_VERSION:-$(resolve_helm_chart_version "$version")}"
+if [[ -z "${CV}" ]]; then
+    echo "Error: Could not resolve a Helm chart version for '${version}'." >&2
+    echo "Check available tags: https://quay.io/repository/rhdh/chart?tab=tags" >&2
     exit 1
 fi
-
 echo "Using Helm chart version: ${CV}"
 
-# Catalog index tag defaults to the major.minor version, or "next" for next
-if [[ "$version" == "next" ]]; then
-    CATALOG_INDEX_TAG="${CATALOG_INDEX_TAG:-next}"
-else
-    CATALOG_INDEX_TAG="${CATALOG_INDEX_TAG:-$(echo "$version" | grep -oE '^[0-9]+\.[0-9]+')}"
-fi
-echo "Using catalog index tag: ${CATALOG_INDEX_TAG}"
-
 CHART_URL="oci://quay.io/rhdh/chart"
-if ! helm show chart $CHART_URL --version $CV &> /dev/null; then github=1; fi
-if [[ $github -eq 1 ]]; then
-    CHART_URL="https://github.com/rhdh-bot/openshift-helm-charts/raw/redhat-developer-hub-${CV}/charts/redhat/redhat/redhat-developer-hub/${CV}/redhat-developer-hub-${CV}.tgz"
-    oc apply -f "https://github.com/rhdh-bot/openshift-helm-charts/raw/redhat-developer-hub-${CV}/installation/rhdh-next-ci-repo.yaml"
-fi
+helm show chart "$CHART_URL" --version "$CV" >/dev/null
 
-echo "Using ${CHART_URL} to install Helm chart"
-
-# Install orchestrator infrastructure if requested
-if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
-    echo "Installing orchestrator infrastructure chart..."
-    # Check if operators are already installed on the cluster (cluster-scoped, shared across namespaces)
+# ── Orchestrator infrastructure ───────────────────────────────────────────────
+if plugin_enabled orchestrator && [[ "${RHDH_RENDER_ONLY:-false}" != "true" ]]; then
     if oc get pods -n openshift-serverless --no-headers 2>/dev/null | grep -q . && \
        oc get pods -n openshift-serverless-logic --no-headers 2>/dev/null | grep -q .; then
         echo "Serverless operators already running on cluster, skipping infra chart."
     else
-        INFRA_ARGS=(--version "$CV" --namespace "$namespace"
+        # Infra chart tags lag the main RHDH chart (e.g. chart 2.2-110-CI vs
+        # infra 2.2-99-CI). Resolve an available tag on the same release line.
+        chart_line=$(grep -oE '^[0-9]+\.[0-9]+' <<< "$CV")
+        INFRA_CV=""
+        if helm show chart oci://quay.io/rhdh/orchestrator-infra-chart --version "$CV" &>/dev/null; then
+            INFRA_CV="$CV"
+        else
+            INFRA_CV=$(quay_latest_tag "rhdh/orchestrator-infra-chart" "$chart_line")
+        fi
+        if [[ -z "${INFRA_CV}" ]]; then
+            echo "Error: No RHDH ${chart_line} orchestrator infrastructure chart is available." >&2
+            exit 1
+        fi
+        if [[ "${INFRA_CV}" != "${CV}" ]]; then
+            echo "Orchestrator infra chart '${CV}' not found; using '${INFRA_CV}' instead."
+        fi
+
+        INFRA_ARGS=(--version "$INFRA_CV" --namespace "$namespace"
             --wait --timeout=5m
             --set serverlessLogicOperator.subscription.spec.installPlanApproval=Automatic
             --set serverlessOperator.subscription.spec.installPlanApproval=Automatic)
-        # Skip CRDs if they already exist (e.g. installed by OLM)
-        if oc get crd knativeservings.operator.knative.dev &>/dev/null; then
-            INFRA_ARGS+=(--skip-crds)
+        if helm show crds oci://quay.io/rhdh/orchestrator-infra-chart --version "$INFRA_CV" &>/dev/null; then
+            if oc get crd knativeservings.operator.knative.dev &>/dev/null; then
+                INFRA_ARGS+=(--skip-crds)
+            fi
         fi
-        helm install orchestrator-infra oci://quay.io/rhdh/orchestrator-infra-chart "${INFRA_ARGS[@]}"
+        helm upgrade --install orchestrator-infra oci://quay.io/rhdh/orchestrator-infra-chart "${INFRA_ARGS[@]}"
         echo "Orchestrator infrastructure chart installed successfully."
     fi
 
-    # Wait for operator pods to appear
-    echo "Waiting for serverless operator pods..."
-    until [[ "$(oc get pods -n openshift-serverless --no-headers 2>/dev/null | wc -l)" -gt 0 ]]; do sleep 5; done
-    until [[ "$(oc get pods -n openshift-serverless-logic --no-headers 2>/dev/null | wc -l)" -gt 0 ]]; do sleep 5; done
-    echo "Serverless operator pods are running."
+    echo "Waiting for the serverless APIs..."
+    wait_for_crd sonataflowplatforms.sonataflow.org
+    wait_for_crd knativeservings.operator.knative.dev
 fi
 
-# Build dynamic plugins value file.
-# Read from the cluster ConfigMap seeded in deploy.sh and augmented by any
-# plugin setup scripts. Fall back to config/dynamic-plugins.yaml if the
-# ConfigMap is not available (e.g. standalone helm/deploy.sh execution).
-DYNAMIC_PLUGINS_FILE=$(mktemp)
-trap "rm -f $DYNAMIC_PLUGINS_FILE" EXIT
-echo "global:" > "$DYNAMIC_PLUGINS_FILE"
-echo "  dynamic:" >> "$DYNAMIC_PLUGINS_FILE"
-# Escape {{inherit}} for Helm's Go template engine: {{inherit}} -> {{ "{{inherit}}" }}
-if oc get configmap dynamic-plugins --namespace "$namespace" &>/dev/null; then
-    oc get configmap dynamic-plugins \
-        --namespace "$namespace" \
-        -o jsonpath='{.data.dynamic-plugins\.yaml}' \
-        | sed -e 's/^/    /' -e 's/{{inherit}}/{{ "{{inherit}}" }}/g' \
-        >> "$DYNAMIC_PLUGINS_FILE"
-else
-    sed -e 's/^/    /' -e 's/{{inherit}}/{{ "{{inherit}}" }}/g' \
-        config/dynamic-plugins.yaml >> "$DYNAMIC_PLUGINS_FILE"
-fi
+# ── Chart values ──────────────────────────────────────────────────────────────
+# Dynamic plugins come from the merged configuration built by deploy.sh (or the
+# base file when this script is run standalone).
+DYNAMIC_PLUGINS_FILE="${DYNAMIC_PLUGINS_FILE:-${DEPLOY_ROOT}/config/dynamic-plugins.yaml}"
+DYNAMIC_PLUGINS_VALUES="${DEPLOY_WORKDIR:-$(mktemp -d)}/helm-dynamic-plugins.json"
+yq -o=json '{"dynamicPlugins": .}' "$DYNAMIC_PLUGINS_FILE" > "$DYNAMIC_PLUGINS_VALUES"
 
-# Build helm install arguments
+EXTRA_APP_CONFIGS='[{"configMapRef":"app-config-rhdh","filename":"app-config-rhdh.yaml"}]'
+
 HELM_ARGS=(
-    -f "helm/value_file.yaml"
-    -f "$DYNAMIC_PLUGINS_FILE"
-    --set global.clusterRouterBase="${CLUSTER_ROUTER_BASE}"
-    --set global.catalogIndex.image.registry="quay.io"
-    --set global.catalogIndex.image.repository="rhdh/plugin-catalog-index"
-    --set global.catalogIndex.image.tag="${CATALOG_INDEX_TAG}"
+    -f "${DEPLOY_ROOT}/helm/value_file.yaml"
+    -f "$DYNAMIC_PLUGINS_VALUES"
+    --set "openshift.clusterRouterBase=${CLUSTER_ROUTER_BASE}"
+    --set-json "extraAppConfig=${EXTRA_APP_CONFIGS}"
     --namespace "$namespace"
 )
 
-if [[ "${WITH_ORCHESTRATOR}" == "1" ]]; then
+if [[ -n "${CATALOG_INDEX_IMAGE:-}" ]]; then
+    HELM_ARGS+=(--set-json "catalogIndex.image=$(image_values "$CATALOG_INDEX_IMAGE")")
+fi
+
+# The chart appends its own plugin list when these components are enabled.
+if plugin_enabled orchestrator; then
     HELM_ARGS+=(--set orchestrator.enabled=true)
 fi
-
-if [[ "${IS_AUTH_ENABLED:-false}" != "true" ]]; then
-    HELM_ARGS+=(
-        --set "upstream.backstage.extraAppConfig[1].configMapRef=app-config-guest-auth"
-        --set "upstream.backstage.extraAppConfig[1].filename=app-config-guest-auth.yaml"
-    )
+if plugin_enabled intelligent-assistant; then
+    HELM_ARGS+=(--set intelligentAssistant.enabled=true)
+    if [[ "${LIGHTSPEED_HAS_PROVIDER:-false}" == "true" ]]; then
+        HELM_ARGS+=(
+            --set intelligentAssistant.existingSecret=intelligent-assistant-secrets
+            --set intelligentAssistant.config.stack.existingConfigMap.name=intelligent-assistant-stack
+            --set intelligentAssistant.config.stack.existingConfigMap.key=lightspeed-stack.yaml
+        )
+    fi
+else
+    # The 2.2 chart enables Intelligent Assistant by default; only run the
+    # sidecar when the plugin (and therefore a possible provider) is selected.
+    HELM_ARGS+=(--set intelligentAssistant.enabled=false)
 fi
 
-# Install or upgrade Helm chart
-helm upgrade --install redhat-developer-hub "${CHART_URL}" --version "$CV" "${HELM_ARGS[@]}"
+if [[ -n "${RHDH_IMAGE:-}" ]]; then
+    HELM_ARGS+=(--set-json "image=$(image_values "$RHDH_IMAGE")")
+fi
 
-# Scale down and up to ensure fresh pods (helm does not monitor config changes)
-oc scale deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' --replicas=0 -n "$namespace"
-oc wait --for=delete pod -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub),app.kubernetes.io/name!=postgresql' -n "$namespace" --timeout=120s || true
-oc scale deployment -l 'app.kubernetes.io/instance in (redhat-developer-hub,developer-hub)' --replicas=1 -n "$namespace"
+if [[ "${RHDH_RENDER_ONLY:-false}" == "true" ]]; then
+    helm template redhat-developer-hub "$CHART_URL" --version "$CV" "${HELM_ARGS[@]}"
+    exit 0
+fi
+
+helm upgrade --install redhat-developer-hub "$CHART_URL" --version "$CV" "${HELM_ARGS[@]}"
